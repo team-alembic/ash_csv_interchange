@@ -1,135 +1,106 @@
-# Elixir Package Template
+# AshCsvInterchange
 
-A starter template for team-alembic Elixir packages. `mix new` plus every
-nicety we use across [ash_authentication](https://github.com/team-alembic/ash_authentication),
-[ash_graphql](https://github.com/team-alembic/ash_graphql),
-[ash_diagram](https://github.com/team-alembic/ash_diagram),
-[clarity](https://github.com/team-alembic/clarity),
-and friends — pre-wired and ready to go.
+[![CI](https://github.com/team-alembic/ash_csv_interchange/actions/workflows/elixir.yml/badge.svg)](https://github.com/team-alembic/ash_csv_interchange/actions/workflows/elixir.yml)
+[![Hex version badge](https://img.shields.io/hexpm/v/ash_csv_interchange.svg)](https://hex.pm/packages/ash_csv_interchange)
+[![Hexdocs badge](https://img.shields.io/badge/docs-hexdocs-purple)](https://hexdocs.pm/ash_csv_interchange)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-## Quick start
+An Ash extension for declaring CSV-importable and CSV-exportable resources via a Spark DSL.
 
-### 1. Create the repo
+Resources that use the extension expose:
 
-Either via the GitHub UI (**Use this template → Create a new repository**) or:
+- a `csv_imports do … end` block declaring one or more named CSV types via
+  `csv_import :id do … end` entities, dispatched to per-row Ash `:create`
+  actions and re-run idempotently through Ash's upsert mechanism
+- a `csv_exports do … end` block declaring `csv_export :id do … end` entities
+  that stream a read action's records out to CSV
 
-```bash
-gh repo create team-alembic/your_package \
-  --template team-alembic/elixir_package_template \
-  --private --clone
+## Installation
 
-cd your_package
+This is a private git dependency for now (it will be published to Hex later).
+Add it to your `mix.exs` the same way you would `ash_audit` or `ash_workflow`:
+
+```elixir
+def deps do
+  [
+    {:ash_csv_interchange,
+     git: "git@github.com:team-alembic/ash_csv_interchange.git"}
+  ]
+end
 ```
 
-### 2. Rename the placeholder
+## Usage
 
-The template uses `my_package` / `MyPackage` everywhere. Run the bundled
-script with your real names:
+Add the extension to a resource and declare its CSV types:
 
-```bash
-./rename.sh your_package YourPackage
+```elixir
+defmodule MyApp.Contact do
+  use Ash.Resource,
+    extensions: [AshCsvInterchange]
+
+  csv_imports do
+    csv_import :contacts do
+      label "Contacts Export"
+      headers required: ["external_id", "first_name"], optional: []
+      upsert_action :import_from_csv
+    end
+  end
+
+  # ... actions, attributes, identities ...
+end
 ```
 
-This rewrites every file, renames any path containing `my_package`, swaps the
-template-facing README for the package-facing one, and (when you're done)
-deletes itself plus `TEMPLATE.md`:
+Register the domains that hold your CSV resources in config:
 
-```bash
-git add -A
-git commit -m "chore: initial rename"
-rm rename.sh TEMPLATE.md
+```elixir
+config :my_app, AshCsvInterchange, domains: [MyApp.Domain]
 ```
 
-### 3. Wire up CI secrets
+Then import and export CSV data through the public API:
 
-In your new repo's settings → **Secrets and variables → Actions**, add:
+```elixir
+# Import a CSV binary against a registered type.
+AshCsvInterchange.import_csv(:contacts, csv_binary, mode: :commit)
 
-- `HEX_API_KEY` — required for `release.yml`. Generate one with
-  `mix hex.user.key generate`.
+# Export a registered type as a single binary, or stream it.
+{:ok, csv} = AshCsvInterchange.export_csv(:contacts)
+{:ok, stream} = AshCsvInterchange.stream_export(:contacts, batch_size: 500)
+```
 
-Then under **Settings → Pages**, set Source to **GitHub Actions** so the CI
-pipeline can deploy your docs.
+See the [online documentation](https://hexdocs.pm/ash_csv_interchange) for more.
 
-### 4. Sync agent skills (if using Ash / Phoenix / etc.)
+## Development
 
-Edit the `usage_rules()` function in `mix.exs` to list the deps you want
-exposed as agent skills, then:
+Requires Elixir / OTP as pinned in [`.tool-versions`](./.tool-versions).
 
 ```bash
 mix deps.get
-mix usage_rules.sync
-git add .claude/skills && git commit -m "chore: sync agent skills"
+mix check        # full local quality suite
+mix test         # just the tests
+mix format       # format all files
 ```
 
-That's it. See [TEMPLATE.md](./TEMPLATE.md) for the full walkthrough including
-first release.
+Or use the included [devcontainer](./.devcontainer/devcontainer.json) — opens
+with VS Code or any devcontainer-compatible editor and sets up Elixir + asdf
+automatically.
 
-## What's in the box
+## Releases
 
-**CI** ([.github/workflows/elixir.yml](./.github/workflows/elixir.yml))
-delegates to [team-alembic/staple-actions](https://github.com/team-alembic/staple-actions):
-deps → hex.audit → compile → format / credo --strict / doctor / sobelow /
-dialyzer / test / unused-deps / conventional-commit → docs build + deploy to
-GitHub Pages → automatic `git_ops.release` on main.
+Releases are automated via [`git_ops`](https://hex.pm/packages/git_ops) and
+conventional commits. To cut a release:
 
-**Hex publishing** ([.github/workflows/release.yml](./.github/workflows/release.yml))
-runs `mix hex.publish` on GitHub Release publication.
+```bash
+mix git_ops.release
+git push && git push --tags
+```
 
-**Quality stack** mirroring [ash-project](https://github.com/ash-project) house style:
-
-- `credo` strict, with `AliasUsage` / `Specs` / `StrictModuleLayout` off
-- `quokka` formatter that auto-rewrites code based on `.credo.exs`
-- `dialyxir` type checking
-- `doctor` doc-coverage gate
-- `sobelow` security checks
-- `mix_audit` / `hex.audit` for dep vulnerabilities
-- `ex_check` to run the full suite locally
-- `mix_test_watch` for `mix test.watch`
-- `doctest_formatter` so doctests format on `mix format`
-
-**Release automation** via [`git_ops`](https://hex.pm/packages/git_ops) —
-conventional-commit history → `CHANGELOG.md` + `mix.exs` version bump + tag,
-all with one command.
-
-**Agent tooling**
-
-- [`AGENTS.md`](./AGENTS.md) — source of truth for AI agents (stack, commands, rules)
-- [`CLAUDE.md`](./CLAUDE.md) — thin pointer at AGENTS.md
-- [`usage-rules.md`](./usage-rules.md) — Ash-ecosystem convention published via Hex
-- `usage_rules` skills mode — generates `.claude/skills/*/SKILL.md` from
-  dependencies' rules; stale skills auto-pruned, custom content preserved
-- [`.claude/`](./.claude) — format-on-edit hook, pre-approved mix commands,
-  `/check` and `/release` slash commands
-
-**Dependabot** ([.github/dependabot.yml](./.github/dependabot.yml)) — monthly,
-grouped, lockfile-only; covers mix, GitHub Actions, and devcontainers.
-
-**Devcontainer** ([.devcontainer/](./.devcontainer)) — Debian + Erlang build
-deps + asdf + Claude Code + Node + GitHub CLI; mounts `~/.claude` so plugins
-travel with you.
-
-**Issue + PR templates**, **Apache 2.0 LICENSE**, **CHANGELOG seed**,
-**`guides/` directory** for narrative docs (reference docs are auto-generated
-by ExDoc from `@doc`/`@moduledoc`).
-
-**Opt-in extras** (commented out in the relevant files):
-
-- `ash_credo` Credo plugin with Ash-aware checks
-- Per-package `usage-rules.md` and composed multi-dep skills
-- Plausible analytics for hexdocs (matches ash-project convention)
-- `ASH_VERSION` env override pattern for developing against unreleased Ash
-
-## Background
-
-Built from prior art across the team-alembic and ash-project Elixir
-ecosystems. The full survey and design decisions are documented in the
-initial commit message; in short: it picks staple-actions over the
-ash-project reusable workflow (so non-Ash packages aren't dragged into
-that ecosystem), defaults to skills mode for `usage_rules` (so package
-knowledge ships as Claude Code skills, not a single monolithic AGENTS.md),
-and mirrors ash-project's `.credo.exs` so the strictness bar matches what
-Alembic devs already work to.
+Then create a GitHub Release from the tag — the `release.yml` workflow
+publishes to Hex on your behalf.
 
 ## License
 
 Apache 2.0. See [LICENSE](./LICENSE).
+
+---
+
+<sub>This repository was generated from [team-alembic/elixir_package_template](https://github.com/team-alembic/elixir_package_template).</sub>

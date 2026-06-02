@@ -7,7 +7,7 @@ this repository. This file is the source of truth; `CLAUDE.md` forwards to it.
 
 <!-- TODO: Replace with a one-paragraph description of this package. -->
 
-`my_package` is an Elixir library distributed via Hex. Keep the public API
+`ash_csv_interchange` is an Elixir library distributed via Hex. Keep the public API
 small, documented, and backwards-compatible between minor releases.
 
 ## Stack

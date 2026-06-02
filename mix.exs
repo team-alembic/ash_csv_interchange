@@ -1,12 +1,12 @@
-defmodule MyPackage.MixProject do
+defmodule AshCsvInterchange.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/team-alembic/my_package"
+  @source_url "https://github.com/team-alembic/ash_csv_interchange"
 
   def project do
     [
-      app: :my_package,
+      app: :ash_csv_interchange,
       version: @version,
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -16,7 +16,7 @@ defmodule MyPackage.MixProject do
       aliases: aliases(),
       package: package(),
       description: description(),
-      name: "MyPackage",
+      name: "AshCsvInterchange",
       source_url: @source_url,
       homepage_url: @source_url,
       docs: &docs/0,
@@ -41,7 +41,7 @@ defmodule MyPackage.MixProject do
   defp elixirc_paths(_), do: ["lib"]
 
   defp description do
-    "TODO: Replace with a one-sentence description of this package."
+    "An Ash extension for declaring CSV-importable and CSV-exportable resources via a Spark DSL."
   end
 
   defp package do
@@ -60,6 +60,11 @@ defmodule MyPackage.MixProject do
 
   defp deps do
     [
+      # Runtime — the extension is a Spark DSL built on Ash; :spark and
+      # :nimble_options arrive transitively via :ash.
+      {:ash, "~> 3.0"},
+      {:nimble_csv, "~> 1.2"},
+
       # Docs
       {:ex_doc, "~> 0.34", only: [:dev, :test], runtime: false},
 
