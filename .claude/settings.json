@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mix compile:*)",
+      "Bash(mix deps.get:*)",
+      "Bash(mix deps.unlock:*)",
+      "Bash(mix deps.audit:*)",
+      "Bash(mix format:*)",
+      "Bash(mix test:*)",
+      "Bash(mix credo:*)",
+      "Bash(mix dialyzer:*)",
+      "Bash(mix doctor:*)",
+      "Bash(mix docs:*)",
+      "Bash(mix check:*)",
+      "Bash(mix sobelow:*)",
+      "Bash(mix hex.audit:*)",
+      "Bash(mix usage_rules.sync:*)",
+      "Bash(mix git_ops.check_message:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/format-elixir.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,107 @@
+# ------------------------------------------------------------------
+# Mix / Elixir
+# ------------------------------------------------------------------
+
+# Compiled artifacts.
+/_build/
+
+# `mix test --cover` output.
+/cover/
+
+# `mix deps.get` fetched source.
+/deps/
+
+# ExDoc / `mix docs` output.
+/doc/
+
+# `mix deps.get --fetch-only` state.
+/.fetch
+
+# VM crash dumps.
+erl_crash.dump
+*.dump
+
+# Archive artifacts (`mix archive.build`).
+*.ez
+
+# Package tarball (`mix hex.build`). rename.sh rewrites the prefix.
+my_package-*.tar
+
+# Stray compile output.
+*.beam
+
+# Dialyzer PLT cache.
+/priv/plts/
+!/priv/plts/.gitkeep
+
+# Mnesia schema directories (if the app ever starts Mnesia locally).
+/Mnesia.*
+
+# ------------------------------------------------------------------
+# Secrets / local config
+# ------------------------------------------------------------------
+
+# Every .env — keep .env.example committed as a template.
+.env
+.env.*
+!.env.example
+
+# Personal IEx helpers (loaded by .iex.exs if present).
+.iex.local.exs
+
+# Local asdf tool override.
+.tool-versions.local
+
+# ------------------------------------------------------------------
+# Editor / LSP
+# ------------------------------------------------------------------
+
+# ElixirLS, Lexical, Expert, elixir-tools.
+.elixir_ls/
+.lexical/
+.expert/
+.elixir-tools/
+
+# VS Code workspace files (devcontainer is shared; per-user isn't).
+.vscode/
+
+# JetBrains.
+.idea/
+*.iml
+
+# Vim / Emacs.
+*.swp
+*.swo
+*~
+\#*\#
+.\#*
+
+# ------------------------------------------------------------------
+# OS junk
+# ------------------------------------------------------------------
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ------------------------------------------------------------------
+# Nix / direnv
+# ------------------------------------------------------------------
+
+shell.nix
+.direnv/
+.envrc
+
+# ------------------------------------------------------------------
+# Claude Code
+# ------------------------------------------------------------------
+
+# Per-user settings and session logs — committed files live alongside.
+.claude/settings.local.json
+.claude/logs/
+
+# ------------------------------------------------------------------
+# Misc
+# ------------------------------------------------------------------
+
+/tmp/

@@ -1,0 +1,39 @@
+{
+  "name": "my_package",
+  "image": "mcr.microsoft.com/devcontainers/base:debian",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers-extra/features/apt-packages:1": {
+      "packages": "autoconf,m4,libwxgtk3.2-dev,libwxgtk-webview3.2-dev,libgl1-mesa-dev,libglu1-mesa-dev,libpng-dev,libssh-dev,unixodbc-dev,xsltproc,fop,libxml2-utils,libncurses-dev"
+    },
+    "ghcr.io/devcontainer-community/devcontainer-features/asdf-vm.com:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
+  },
+  "onCreateCommand": "bash .devcontainer/setup.sh",
+  "remoteEnv": {
+    "HEX_API_KEY": "${localEnv:HEX_API_KEY}"
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.claude,target=/home/vscode/.claude,type=bind,consistency=cached",
+    "source=my-package-mix-cache,target=/home/vscode/.mix,type=volume"
+  ],
+  "forwardPorts": [],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "anthropic.claude-code",
+        "jakebecker.elixir-ls",
+        "animus-coop.vscode-elixir-mix-formatter",
+        "pgourlain.erlang"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "[elixir]": {
+          "editor.defaultFormatter": "animus-coop.vscode-elixir-mix-formatter"
+        }
+      }
+    }
+  },
+  "remoteUser": "vscode"
+}
