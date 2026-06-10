@@ -34,6 +34,17 @@ defmodule AshCsvInterchange.ExportTestResource do
       read_action :for_csv_export
       columns([{"first_name", :first_name, format: &__MODULE__.boom/1}])
     end
+
+    csv_export :contacts_by_last_name do
+      label("Contacts by Last Name")
+      read_action :for_csv_export_by_last_name
+
+      columns([
+        {"external_id", :external_id},
+        {"first_name", :first_name},
+        {"last_name", :last_name}
+      ])
+    end
   end
 
   @doc false
@@ -51,6 +62,13 @@ defmodule AshCsvInterchange.ExportTestResource do
       description "Read action driving the :contacts CSV export"
       pagination keyset?: true, required?: false
       prepare build(load: [:full_name])
+    end
+
+    read :for_csv_export_by_last_name do
+      description "Required-argument read action used by export :input tests"
+      argument :last_name, :string, allow_nil?: false
+      filter expr(last_name == ^arg(:last_name))
+      pagination keyset?: true, required?: false
     end
 
     create :import_contacts do

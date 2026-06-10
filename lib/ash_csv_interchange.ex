@@ -117,8 +117,9 @@ defmodule AshCsvInterchange do
   defp action_for(:import, type), do: type.upsert_action
   defp action_for(:export, type), do: type.read_action
 
-  defp authorised?(_resource, _action, nil), do: true
-  defp authorised?(resource, action, actor), do: Ash.can?({resource, action}, actor)
+  defp authorised?(resource, action, actor, input \\ %{})
+  defp authorised?(_resource, _action, nil, _input), do: true
+  defp authorised?(resource, action, actor, input), do: Ash.can?({resource, action, input}, actor)
 
   defp ensure_unique_type_ids!(direction, all) do
     dups =
@@ -223,6 +224,10 @@ defmodule AshCsvInterchange do
 
     * `:actor` runs the stream as this actor; authorisation honours the
       resource's policies on the read action.
+    * `:input` arguments passed to the declared read action, as a map.
+      Defaults to `%{}`. Required when the read action declares required
+      arguments — omitting it then raises the read action's
+      missing-argument error once the stream is consumed.
     * `:batch_size` page size for the underlying read. Defaults to `500`.
 
   Returns `{:error, %Error{}}` synchronously before any database work
@@ -235,8 +240,9 @@ defmodule AshCsvInterchange do
   def stream_export(id, opts \\ []) when is_atom(id) do
     with {:ok, %{resource: resource, type: type}} <- fetch_export_type(id) do
       actor = Keyword.get(opts, :actor)
+      input = Keyword.get(opts, :input, %{})
 
-      if authorised?(resource, type.read_action, actor) do
+      if authorised?(resource, type.read_action, actor, input) do
         {:ok, AshCsvInterchange.Export.Orchestrator.build_stream(resource, type, opts)}
       else
         {:error,

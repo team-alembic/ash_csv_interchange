@@ -44,6 +44,18 @@ AshCsvInterchange.import_csv(:contacts, csv_binary, mode: :commit)
 {:ok, csv} = AshCsvInterchange.export_csv(:contacts)
 ```
 
+If the export's read action takes arguments, pass them with `:input` (a map,
+default `%{}`). Read actions with required arguments raise their
+missing-argument error when `:input` is omitted:
+
+```elixir
+{:ok, csv} =
+  AshCsvInterchange.export_csv(:contacts_by_last_name,
+    input: %{last_name: "Lovelace"},
+    actor: actor
+  )
+```
+
 ## Anti-patterns
 
 - Do **not** reuse the same `:id` across resources in one configured domain set

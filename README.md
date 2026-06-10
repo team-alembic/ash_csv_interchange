@@ -65,6 +65,9 @@ AshCsvInterchange.import_csv(:contacts, csv_binary, mode: :commit)
 # Export a registered type as a single binary, or stream it.
 {:ok, csv} = AshCsvInterchange.export_csv(:contacts)
 {:ok, stream} = AshCsvInterchange.stream_export(:contacts, batch_size: 500)
+
+# Pass arguments to the export's read action with :input.
+{:ok, csv} = AshCsvInterchange.export_csv(:contacts, input: %{last_name: "Lovelace"})
 ```
 
 See the [online documentation](https://hexdocs.pm/ash_csv_interchange) for more.

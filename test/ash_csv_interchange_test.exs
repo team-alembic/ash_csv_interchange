@@ -221,6 +221,26 @@ defmodule AshCsvInterchangeTest do
       assert binary =~ "C-1,Ada,Lovelace"
     end
 
+    test "passes :input arguments through to the configured read action" do
+      ExportTestResource.create_contact!(%{
+        external_id: "C-2",
+        first_name: "Grace",
+        last_name: "Hopper"
+      })
+
+      assert {:ok, binary} =
+               AshCsvInterchange.export_csv(:contacts_by_last_name, input: %{last_name: "Lovelace"})
+
+      assert binary =~ "C-1,Ada,Lovelace"
+      refute binary =~ "Hopper"
+    end
+
+    test "omitting :input on a required-argument read action raises the missing-argument error" do
+      assert_raise Ash.Error.Invalid, ~r/last_name is required/, fn ->
+        AshCsvInterchange.export_csv(:contacts_by_last_name)
+      end
+    end
+
     test "propagates errors from stream_export" do
       assert {:error, %AshCsvInterchange.Error{kind: :type_not_found}} =
                AshCsvInterchange.export_csv(:does_not_exist)
