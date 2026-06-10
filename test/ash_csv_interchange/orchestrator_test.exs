@@ -1,8 +1,6 @@
 defmodule AshCsvInterchange.Import.OrchestratorTest do
   use ExUnit.Case, async: false
 
-  alias Ash.DataLayer.Ets
-
   alias AshCsvInterchange.{
     ActorAwareResource,
     CrashingResource,
@@ -14,14 +12,6 @@ defmodule AshCsvInterchange.Import.OrchestratorTest do
   }
 
   alias AshCsvInterchange.Import.{Orchestrator, RowOutcome, RunReport}
-
-  setup do
-    on_exit(fn ->
-      Ets.stop(TestResource)
-    end)
-
-    :ok
-  end
 
   describe "import_csv/4 in :dry_run mode" do
     test "returns :ok outcomes for valid rows without persisting" do

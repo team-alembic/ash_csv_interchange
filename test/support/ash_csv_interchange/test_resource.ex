@@ -9,6 +9,12 @@ defmodule AshCsvInterchange.TestResource do
     data_layer: Ash.DataLayer.Ets,
     extensions: [AshCsvInterchange]
 
+  # Private tables are scoped to the calling process, so each test gets a
+  # fresh table with no cross-test cleanup needed.
+  ets do
+    private?(true)
+  end
+
   csv_imports do
     csv_import :test_resource do
       label("Test Resource")

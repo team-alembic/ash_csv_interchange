@@ -1,14 +1,8 @@
 defmodule AshCsvInterchange.Export.OrchestratorTest do
   use ExUnit.Case, async: false
 
-  alias Ash.DataLayer.Ets
   alias AshCsvInterchange.Export.Orchestrator
   alias AshCsvInterchange.ExportTestResource
-
-  setup do
-    on_exit(fn -> Ets.stop(ExportTestResource) end)
-    :ok
-  end
 
   defp type!(id \\ :contacts) do
     {:ok, type} = AshCsvInterchange.Info.csv_export_type(ExportTestResource, id)
