@@ -65,6 +65,9 @@ defmodule AshCsvInterchange.MixProject do
       {:ash, "~> 3.0"},
       {:nimble_csv, "~> 1.2"},
 
+      # SAT solver for the policy-bearing test fixtures.
+      {:simple_sat, "~> 0.1", only: [:dev, :test]},
+
       # Docs
       {:ex_doc, "~> 0.34", only: [:dev, :test], runtime: false},
 
