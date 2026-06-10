@@ -1,7 +1,6 @@
 defmodule AshCsvInterchangeTest do
   use ExUnit.Case, async: false
 
-  alias Ash.DataLayer.Ets
   alias AshCsvInterchange.Export.Type, as: ExportType
 
   alias AshCsvInterchange.{
@@ -78,11 +77,6 @@ defmodule AshCsvInterchangeTest do
   end
 
   describe "import_csv/4" do
-    setup do
-      on_exit(fn -> Ets.stop(TestResource) end)
-      :ok
-    end
-
     test "delegates to Orchestrator end-to-end" do
       csv = """
       external_id,name,date_of_birth
@@ -144,8 +138,6 @@ defmodule AshCsvInterchangeTest do
 
   describe "stream_export/2" do
     setup do
-      on_exit(fn -> Ets.stop(ExportTestResource) end)
-
       ExportTestResource.create_contact!(%{
         external_id: "C-1",
         first_name: "Ada",
@@ -204,8 +196,6 @@ defmodule AshCsvInterchangeTest do
 
   describe "export_csv/2" do
     setup do
-      on_exit(fn -> Ets.stop(ExportTestResource) end)
-
       ExportTestResource.create_contact!(%{
         external_id: "C-1",
         first_name: "Ada",

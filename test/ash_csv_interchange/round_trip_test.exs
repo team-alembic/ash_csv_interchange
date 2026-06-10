@@ -1,7 +1,6 @@
 defmodule AshCsvInterchange.RoundTripTest do
   use ExUnit.Case, async: false
 
-  alias Ash.DataLayer.Ets
   alias AshCsvInterchange.ExportTestDomain
   alias AshCsvInterchange.ExportTestResource
 
@@ -19,11 +18,6 @@ defmodule AshCsvInterchange.RoundTripTest do
     :ok
   end
 
-  setup do
-    on_exit(fn -> Ets.stop(ExportTestResource) end)
-    :ok
-  end
-
   test "export → import → same record set" do
     for {ext, first, last} <- [
           {"C-1", "Ada", "Lovelace"},
@@ -38,7 +32,10 @@ defmodule AshCsvInterchange.RoundTripTest do
     end
 
     {:ok, csv} = AshCsvInterchange.export_csv(:contacts)
-    Ets.stop(ExportTestResource)
+
+    ExportTestResource
+    |> Ash.read!(domain: ExportTestDomain)
+    |> Enum.each(&Ash.destroy!(&1, domain: ExportTestDomain))
 
     assert {:ok, %AshCsvInterchange.Import.RunReport{counts: %{succeeded: 3, failed: 0}}} =
              AshCsvInterchange.import_csv(:contacts, csv, mode: :commit)
@@ -73,7 +70,7 @@ defmodule AshCsvInterchange.RoundTripTest do
 
     {:ok, first_csv} = AshCsvInterchange.export_csv(:contacts)
 
-    # No Ets.stop/1 here: importing against the live rows must upsert on the
+    # No clearing of records here: importing against the live rows must upsert on the
     # external_id identity rather than insert duplicates.
     assert {:ok, %AshCsvInterchange.Import.RunReport{counts: %{succeeded: 3, failed: 0}}} =
              AshCsvInterchange.import_csv(:contacts, first_csv, mode: :commit)
