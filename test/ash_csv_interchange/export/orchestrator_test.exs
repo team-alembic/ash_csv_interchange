@@ -10,8 +10,8 @@ defmodule AshCsvInterchange.Export.OrchestratorTest do
     :ok
   end
 
-  defp type! do
-    {:ok, type} = AshCsvInterchange.Info.csv_export_type(ExportTestResource, :contacts)
+  defp type!(id \\ :contacts) do
+    {:ok, type} = AshCsvInterchange.Info.csv_export_type(ExportTestResource, id)
     type
   end
 
@@ -69,6 +69,32 @@ defmodule AshCsvInterchange.Export.OrchestratorTest do
 
       for i <- 1..record_count do
         assert "C-#{i},First#{i},Last#{i}" in rows
+      end
+    end
+  end
+
+  describe "build_stream/3 with :input" do
+    test "passes input to the read action so its filter applies" do
+      seed!(%{external_id: "C-1", first_name: "Ada", last_name: "Lovelace"})
+      seed!(%{external_id: "C-2", first_name: "Grace", last_name: "Hopper"})
+
+      output =
+        ExportTestResource
+        |> Orchestrator.build_stream(type!(:contacts_by_last_name), input: %{last_name: "Lovelace"})
+        |> Enum.join()
+
+      [header_line | rows] = String.split(output, "\r\n", trim: true)
+      assert header_line == "external_id,first_name,last_name"
+      assert rows == ["C-1,Ada,Lovelace"]
+    end
+
+    test "omitting :input on a required-argument read action raises when the stream runs" do
+      seed!(%{external_id: "C-1", first_name: "Ada", last_name: "Lovelace"})
+
+      stream = Orchestrator.build_stream(ExportTestResource, type!(:contacts_by_last_name), [])
+
+      assert_raise Ash.Error.Invalid, ~r/last_name is required/, fn ->
+        Enum.join(stream)
       end
     end
   end

@@ -15,18 +15,19 @@ defmodule AshCsvInterchange.Export.Orchestrator do
   Returns the lazy CSV-chunk stream. The first chunk is the header row;
   subsequent chunks are serialised batches of records read via the
   declared `read_action`. See `AshCsvInterchange.stream_export/2` for
-  the `:actor` and `:batch_size` options.
+  the `:actor`, `:input` and `:batch_size` options.
   """
   @spec build_stream(module(), Type.t(), keyword()) :: Enumerable.t()
   def build_stream(resource, %Type{} = type, opts) do
     batch_size = Keyword.get(opts, :batch_size, @default_batch_size)
     actor = Keyword.get(opts, :actor)
+    input = Keyword.get(opts, :input, %{})
 
     header_chunk = dump_csv([Serializer.header(type.columns)])
 
     row_stream =
       resource
-      |> Ash.Query.for_read(type.read_action, %{}, actor: actor)
+      |> Ash.Query.for_read(type.read_action, input, actor: actor)
       |> Ash.stream!(batch_size: batch_size)
       |> Stream.chunk_every(batch_size)
       |> Stream.map(fn batch ->
