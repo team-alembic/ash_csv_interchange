@@ -57,8 +57,9 @@ defmodule AshCsvInterchange.Import.Parser do
   list of strings), header excluded. Returns `{:error, %Error{}}` for an
   empty file or a malformed header line.
 
-  Invalid UTF-8 in a *data* row is not detected here; it raises
-  `#{inspect(__MODULE__)}.StreamError` when the body stream is consumed.
+  Invalid UTF-8 in a *data* row is not detected here; it raises a
+  StreamError (this module's nested exception) when the body stream is
+  consumed.
   """
   @spec parse_stream(source(), keyword()) ::
           {:ok, {[String.t()], Enumerable.t()}} | {:error, Error.t()}
