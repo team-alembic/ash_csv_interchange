@@ -30,50 +30,98 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     Parser,
     RowOutcome,
     RunReport,
+    RunReport.Counts,
     StreamReport
   }
 
   @ash_forwarded_opts [:actor, :tenant, :authorize?, :scope]
+  @default_max_outcomes 100
 
   @doc """
-  Parses a CSV binary and dispatches each non-blank row to the
-  resource's configured upsert action for the named type. Returns a
-  `%RunReport{}` with per-row outcomes and aggregate counts.
+  Parses a CSV source and dispatches each non-blank row to the resource's
+  configured upsert action for the named type. Returns a bounded
+  `%RunReport{}`: `counts` is exact, `outcomes` is a preview capped at
+  `:max_outcomes`, and `outcomes_truncated?` flags when rows exceeded it.
+
+  The `source` may be a binary, a `{:path, path}` tuple, or a
+  re-enumerable `Enumerable` of binary chunks.
 
   Options:
 
-  * `:mode` — `:dry_run` (default) or `:commit`
-  * `:actor`, `:tenant`, `:authorize?`, `:scope` — forwarded to
-    `Ash.Changeset.for_create/4` for every row, controlling
-    authorization, multitenancy, and scope.
+    * `:mode` — `:dry_run` (default) or `:commit`
+    * `:max_outcomes` — retained outcome preview size (default `100`)
+    * `:retain_records?` — keep the full Ash `record` on committed
+      outcomes (default `false`)
+    * `:actor`, `:tenant`, `:authorize?`, `:scope` — forwarded to
+      `Ash.Changeset.for_create/4` for every row.
   """
   @spec import_csv(module(), atom(), Parser.source(), keyword()) ::
           {:ok, RunReport.t()} | {:error, Error.t()}
   def import_csv(resource, id, source, opts \\ []) when is_atom(resource) and is_atom(id) do
+    mode = Keyword.get(opts, :mode, :dry_run)
+    max_outcomes = Keyword.get(opts, :max_outcomes, @default_max_outcomes)
+
     with {:ok, {type, warnings, header_row, input_keys, events}} <-
            stream_events(resource, id, source, opts) do
-      mode = Keyword.get(opts, :mode, :dry_run)
+      try do
+        {retained_reversed, counts} = fold_events(events, max_outcomes)
 
-      {outcomes, blank_count} =
-        Enum.reduce(events, {[], 0}, fn
-          {:blank, _line_no}, {acc, blanks} -> {acc, blanks + 1}
-          {:outcome, outcome}, {acc, blanks} -> {[outcome | acc], blanks}
-        end)
+        {:ok,
+         %RunReport{
+           mode: mode,
+           resource: resource,
+           type_id: type.id,
+           outcomes: Enum.reverse(retained_reversed),
+           outcomes_truncated?: counts.total > length(retained_reversed),
+           warnings: warnings,
+           counts: counts,
+           source_headers: header_row,
+           input_keys: input_keys
+         }}
+      rescue
+        e in NimbleCSV.ParseError ->
+          {:error, %Error{kind: :malformed_csv, message: Exception.message(e)}}
 
-      outcomes = Enum.reverse(outcomes)
-      counts = RunReport.counts_from_outcomes(outcomes, blank_count)
+        e in Parser.StreamError ->
+          {:error, e.error}
+      end
+    end
+  end
 
-      {:ok,
-       %RunReport{
-         mode: mode,
-         resource: resource,
-         type_id: type.id,
-         outcomes: outcomes,
-         warnings: warnings,
-         counts: counts,
-         source_headers: header_row,
-         input_keys: input_keys
-       }}
+  defp fold_events(events, max_outcomes) do
+    {retained, _kept, counts} =
+      Enum.reduce(events, {[], 0, %Counts{}}, fn
+        {:blank, _line_no}, {retained, kept, counts} ->
+          {retained, kept, %{counts | blank_rows_skipped: counts.blank_rows_skipped + 1}}
+
+        {:outcome, outcome}, {retained, kept, counts} ->
+          counts = tally(counts, outcome)
+
+          if kept < max_outcomes do
+            {[outcome | retained], kept + 1, counts}
+          else
+            {retained, kept, counts}
+          end
+      end)
+
+    {retained, counts}
+  end
+
+  defp tally(counts, outcome) do
+    counts = %{counts | total: counts.total + 1}
+
+    case outcome.status do
+      :ok ->
+        counts = %{counts | succeeded: counts.succeeded + 1}
+
+        case outcome.upsert_kind do
+          :created -> %{counts | created: counts.created + 1}
+          :updated -> %{counts | updated: counts.updated + 1}
+          _ -> counts
+        end
+
+      _ ->
+        %{counts | failed: counts.failed + 1}
     end
   end
 

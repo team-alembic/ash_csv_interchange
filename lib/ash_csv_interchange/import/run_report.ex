@@ -2,8 +2,11 @@ defmodule AshCsvInterchange.Import.RunReport do
   @moduledoc """
   Structured result of a CSV import run.
 
-  `outcomes` is an eager list (not a stream). `counts` is computed once
-  at the end of the run from `outcomes`.
+  `counts` is exact over every row. `outcomes` is a **bounded preview** —
+  the first `:max_outcomes` row outcomes (default 100); `outcomes_truncated?`
+  is `true` when more rows were processed than retained. Callers needing
+  every per-row outcome should use `AshCsvInterchange.stream_import/3` and
+  fold the lazy stream themselves.
   """
 
   alias AshCsvInterchange.Error
@@ -37,6 +40,7 @@ defmodule AshCsvInterchange.Import.RunReport do
     :resource,
     :type_id,
     :outcomes,
+    :outcomes_truncated?,
     :warnings,
     :counts,
     :source_headers,
@@ -47,6 +51,7 @@ defmodule AshCsvInterchange.Import.RunReport do
     :resource,
     :type_id,
     :outcomes,
+    :outcomes_truncated?,
     :warnings,
     :counts,
     :source_headers,
@@ -58,6 +63,7 @@ defmodule AshCsvInterchange.Import.RunReport do
           resource: module(),
           type_id: atom(),
           outcomes: [RowOutcome.t()],
+          outcomes_truncated?: boolean(),
           warnings: [Error.t()],
           counts: Counts.t(),
           source_headers: [String.t()],

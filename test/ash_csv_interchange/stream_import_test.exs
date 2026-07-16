@@ -2,7 +2,7 @@ defmodule AshCsvInterchange.Import.StreamImportTest do
   use ExUnit.Case, async: false
 
   alias AshCsvInterchange.{Error, TestResource}
-  alias AshCsvInterchange.Import.{Orchestrator, RowOutcome, StreamReport}
+  alias AshCsvInterchange.Import.{Orchestrator, RowOutcome, RunReport, StreamReport}
 
   describe "stream_import/4" do
     test "yields one lazy RowOutcome per non-blank row and returns setup metadata" do
@@ -82,6 +82,70 @@ defmodule AshCsvInterchange.Import.StreamImportTest do
 
       assert {:error, %Error{kind: :missing_required_headers}} =
                Orchestrator.stream_import(TestResource, :test_resource, "name\nAlice\n", mode: :dry_run)
+    end
+  end
+
+  describe "import_csv/4 bounded report" do
+    test "counts are exact but outcomes are capped at :max_outcomes" do
+      header = "external_id,name,date_of_birth\n"
+      rows = Enum.map_join(1..250, "", &"E#{&1},N#{&1},2020-01-01\n")
+      csv = header <> rows
+
+      assert {:ok, %RunReport{counts: counts, outcomes: outcomes, outcomes_truncated?: true}} =
+               Orchestrator.import_csv(TestResource, :test_resource, csv,
+                 mode: :dry_run,
+                 max_outcomes: 100
+               )
+
+      assert counts.total == 250
+      assert counts.succeeded == 250
+      assert length(outcomes) == 100
+    end
+
+    test "outcomes_truncated? is false when under the cap" do
+      csv = "external_id,name,date_of_birth\nE1,Alice,2020-01-15\n"
+
+      assert {:ok, %RunReport{outcomes_truncated?: false, outcomes: [_]}} =
+               Orchestrator.import_csv(TestResource, :test_resource, csv, mode: :dry_run)
+    end
+
+    test "counts blank rows separately from outcomes" do
+      csv = "external_id,name,date_of_birth\nE1,Alice,2020-01-15\n,,\nE2,Bob,2019-03-22\n"
+
+      assert {:ok, %RunReport{counts: counts}} =
+               Orchestrator.import_csv(TestResource, :test_resource, csv, mode: :dry_run)
+
+      assert counts.total == 2
+      assert counts.blank_rows_skipped == 1
+    end
+
+    test "does not retain records by default; retains them with retain_records?: true" do
+      csv = "external_id,name,date_of_birth\nE1,Alice,2020-01-15\n"
+
+      assert {:ok, %RunReport{outcomes: [%RowOutcome{record: nil}]}} =
+               Orchestrator.import_csv(TestResource, :test_resource, csv, mode: :commit)
+
+      assert {:ok, %RunReport{outcomes: [%RowOutcome{record: record}]}} =
+               Orchestrator.import_csv(TestResource, :test_resource, csv,
+                 mode: :commit,
+                 retain_records?: true
+               )
+
+      assert record.external_id == "E1"
+    end
+
+    test "malformed CSV in the body returns a fatal error" do
+      csv = ~s(external_id,name,date_of_birth\nE1,"unterminated,2020-01-15\n)
+
+      assert {:error, %Error{kind: :malformed_csv}} =
+               Orchestrator.import_csv(TestResource, :test_resource, csv, mode: :dry_run)
+    end
+
+    test "invalid UTF-8 in the body returns an encoding error" do
+      csv = "external_id,name,date_of_birth\nE1," <> <<0xFF>> <> ",2020-01-15\n"
+
+      assert {:error, %Error{kind: :encoding}} =
+               Orchestrator.import_csv(TestResource, :test_resource, csv, mode: :dry_run)
     end
   end
 end
