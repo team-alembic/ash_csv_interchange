@@ -53,7 +53,13 @@ defmodule AshCsvInterchange do
     ]
 
   alias AshCsvInterchange.{Error, Info}
-  alias AshCsvInterchange.Import.{Orchestrator, RunReport}
+  alias AshCsvInterchange.Import.{Orchestrator, RunReport, StreamReport}
+
+  @typedoc """
+  A CSV import source: an in-memory binary, a `{:path, path}` tuple, or a
+  re-enumerable `Enumerable` of binary chunks.
+  """
+  @type source :: binary() | {:path, Path.t()} | Enumerable.t()
 
   @doc """
   Lists every CSV import type registered across configured domains.
@@ -203,15 +209,34 @@ defmodule AshCsvInterchange do
   end
 
   @doc """
-  Imports a CSV binary against a registered type id. Resolves the owning
+  Imports a CSV source against a registered type id. Resolves the owning
   resource via `fetch_import_type/1`, then delegates to
-  `AshCsvInterchange.Import.Orchestrator.import_csv/4`. See its docs for options.
+  `AshCsvInterchange.Import.Orchestrator.import_csv/4`. See its docs for the
+  `source` shapes and options.
   """
-  @spec import_csv(atom(), binary(), keyword()) ::
+  @spec import_csv(atom(), source(), keyword()) ::
           {:ok, RunReport.t()} | {:error, Error.t()}
-  def import_csv(id, binary, opts \\ []) when is_atom(id) and is_binary(binary) do
+  def import_csv(id, source, opts \\ []) when is_atom(id) do
     with {:ok, %{resource: resource}} <- fetch_import_type(id) do
-      Orchestrator.import_csv(resource, id, binary, opts)
+      Orchestrator.import_csv(resource, id, source, opts)
+    end
+  end
+
+  @doc """
+  Streams a CSV import against a registered type id as a lazy sequence of
+  per-row outcomes. Resolves the owning resource via `fetch_import_type/1`,
+  then delegates to `AshCsvInterchange.Import.Orchestrator.stream_import/4`.
+
+  Returns `{:ok, %AshCsvInterchange.Import.StreamReport{}}` whose `outcomes`
+  field is a lazy stream. In `:commit` mode, writes happen as the stream is
+  consumed — prefer this over `import_csv/3` for large files. See
+  `AshCsvInterchange.Import.Orchestrator.stream_import/4` for options.
+  """
+  @spec stream_import(atom(), source(), keyword()) ::
+          {:ok, StreamReport.t()} | {:error, Error.t()}
+  def stream_import(id, source, opts \\ []) when is_atom(id) do
+    with {:ok, %{resource: resource}} <- fetch_import_type(id) do
+      Orchestrator.stream_import(resource, id, source, opts)
     end
   end
 
