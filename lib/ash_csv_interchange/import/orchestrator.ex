@@ -1,28 +1,37 @@
 defmodule AshCsvInterchange.Import.Orchestrator do
   @moduledoc """
   Drives the CSV import pipeline at runtime. Given a resource module,
-  a CSV type id, and a CSV binary, `import_csv/4`:
+  a CSV type id, and a CSV source, `import_csv/4`:
 
   1. Looks up the named `csv_import` entity on the resource via
      `AshCsvInterchange.Info`. Missing extension or unknown id is fatal.
-  2. Parses the CSV into rows. Encoding errors and malformed CSV
-     short-circuit with a fatal error.
-  3. Pulls the header row off the front. An empty file is fatal.
-  4. Validates the header row against the type's schema. Missing
+  2. Parses the source via `Parser.parse_stream/2`, which reads the
+     header row eagerly (encoding errors, malformed CSV, and an empty
+     file short-circuit fatally) and returns the remaining data rows
+     as a lazy stream.
+  3. Validates the header row against the type's schema. Missing
      required headers and duplicates are fatal; unknown columns become
      warnings on the run report.
-  5. Walks each non-blank data row, building an Ash changeset for the
+  4. Walks each non-blank data row, building an Ash changeset for the
      configured upsert action and either validating it (`:dry_run`) or
      committing it (`:commit`). Per-row failures — validation errors,
      action errors, raised exceptions — become `:invalid` / `:errored`
      / `:crashed` outcomes; the run never aborts on one bad row.
-  6. Aggregates the per-row outcomes into a `%RunReport{}` with
+  5. Aggregates the per-row outcomes into a `%RunReport{}` with
      summary counts and the file-level warnings collected along
      the way.
   """
 
   alias AshCsvInterchange.{Error, Info}
-  alias AshCsvInterchange.Import.{HeaderCheck, Headers, Parser, RowOutcome, RunReport}
+
+  alias AshCsvInterchange.Import.{
+    HeaderCheck,
+    Headers,
+    Parser,
+    RowOutcome,
+    RunReport,
+    StreamReport
+  }
 
   @ash_forwarded_opts [:actor, :tenant, :authorize?, :scope]
 
@@ -38,23 +47,20 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     `Ash.Changeset.for_create/4` for every row, controlling
     authorization, multitenancy, and scope.
   """
-  @spec import_csv(module(), atom(), binary(), keyword()) ::
+  @spec import_csv(module(), atom(), Parser.source(), keyword()) ::
           {:ok, RunReport.t()} | {:error, Error.t()}
-  def import_csv(resource, id, binary, opts \\ []) when is_atom(resource) and is_atom(id) and is_binary(binary) do
-    mode = Keyword.get(opts, :mode, :dry_run)
-    ash_opts = Keyword.take(opts, @ash_forwarded_opts)
-
-    with {:ok, type} <- fetch_type(resource, id),
-         binary = preprocess_unquoted_headers(binary, type.headers),
-         {:ok, parsed_rows} <- Parser.parse(binary),
-         {:ok, header_row, data_rows} <- pull_header_row(parsed_rows),
-         {:ok, %{headers: headers, warnings: warnings}} <-
-           HeaderCheck.verify(header_row, type.headers) do
-      input_keys = build_input_keys(type.headers)
+  def import_csv(resource, id, source, opts \\ []) when is_atom(resource) and is_atom(id) do
+    with {:ok, {type, warnings, header_row, input_keys, events}} <-
+           stream_events(resource, id, source, opts) do
+      mode = Keyword.get(opts, :mode, :dry_run)
 
       {outcomes, blank_count} =
-        process_rows(data_rows, headers, input_keys, type, resource, mode, ash_opts)
+        Enum.reduce(events, {[], 0}, fn
+          {:blank, _line_no}, {acc, blanks} -> {acc, blanks + 1}
+          {:outcome, outcome}, {acc, blanks} -> {[outcome | acc], blanks}
+        end)
 
+      outcomes = Enum.reverse(outcomes)
       counts = RunReport.counts_from_outcomes(outcomes, blank_count)
 
       {:ok,
@@ -69,6 +75,81 @@ defmodule AshCsvInterchange.Import.Orchestrator do
          input_keys: input_keys
        }}
     end
+  end
+
+  @doc """
+  Streams a CSV import as a lazy sequence of per-row outcomes.
+
+  Reads the header eagerly (fatal header/encoding errors return
+  `{:error, %Error{}}` synchronously), then returns a
+  `%AshCsvInterchange.Import.StreamReport{}` whose `outcomes` field is a
+  lazy stream of `%RowOutcome{}` — one per non-blank data row. In
+  `:commit` mode, database writes happen as the stream is consumed.
+
+  Accepts the same `source` shapes and options as `import_csv/4`, plus
+  `:retain_records?` (default `false`) controlling whether committed
+  outcomes carry the full Ash `record`.
+  """
+  @spec stream_import(module(), atom(), Parser.source(), keyword()) ::
+          {:ok, StreamReport.t()} | {:error, Error.t()}
+  def stream_import(resource, id, source, opts \\ []) when is_atom(resource) and is_atom(id) do
+    with {:ok, {_type, warnings, header_row, input_keys, events}} <-
+           stream_events(resource, id, source, opts) do
+      outcomes =
+        Stream.flat_map(events, fn
+          {:outcome, outcome} -> [outcome]
+          {:blank, _line_no} -> []
+        end)
+
+      {:ok,
+       %StreamReport{
+         warnings: warnings,
+         source_headers: header_row,
+         input_keys: input_keys,
+         outcomes: outcomes
+       }}
+    end
+  end
+
+  defp stream_events(resource, id, source, opts) do
+    mode = Keyword.get(opts, :mode, :dry_run)
+    ash_opts = Keyword.take(opts, @ash_forwarded_opts)
+    retain_records? = Keyword.get(opts, :retain_records?, false)
+
+    with {:ok, type} <- fetch_type(resource, id),
+         {:ok, {header_row, body}} <- Parser.parse_stream(source, type.headers),
+         {:ok, %{headers: headers, warnings: warnings}} <-
+           HeaderCheck.verify(header_row, type.headers) do
+      input_keys = build_input_keys(type.headers)
+
+      events =
+        event_stream(body, headers, input_keys, type, resource, mode, ash_opts, retain_records?)
+
+      {:ok, {type, warnings, header_row, input_keys, events}}
+    end
+  end
+
+  defp event_stream(body, headers, input_keys, type, resource, mode, ash_opts, retain_records?) do
+    body
+    |> Stream.with_index(2)
+    |> Stream.map(fn {row, line_no} ->
+      if blank_row?(row) do
+        {:blank, line_no}
+      else
+        {:outcome,
+         process_row(
+           row,
+           line_no,
+           headers,
+           input_keys,
+           type,
+           resource,
+           mode,
+           ash_opts,
+           retain_records?
+         )}
+      end
+    end)
   end
 
   defp fetch_type(resource, id) do
@@ -95,12 +176,6 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     end
   end
 
-  defp pull_header_row([]) do
-    {:error, %Error{kind: :empty_file, message: "CSV file has no header row"}}
-  end
-
-  defp pull_header_row([header | rest]), do: {:ok, header, rest}
-
   defp build_input_keys(headers_config) do
     (headers_config[:required] ++ headers_config[:optional])
     |> Map.new(fn
@@ -112,24 +187,9 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     end)
   end
 
-  defp process_rows(data_rows, headers, input_keys, type, resource, mode, ash_opts) do
-    {outcomes, blank_count} =
-      data_rows
-      |> Enum.with_index(2)
-      |> Enum.reduce({[], 0}, fn {row, line_no}, {acc, blanks} ->
-        if blank_row?(row) do
-          {acc, blanks + 1}
-        else
-          {[process_row(row, line_no, headers, input_keys, type, resource, mode, ash_opts) | acc], blanks}
-        end
-      end)
-
-    {Enum.reverse(outcomes), blank_count}
-  end
-
   defp blank_row?(row), do: Enum.all?(row, &(String.trim(&1) == ""))
 
-  defp process_row(row, line_no, headers, input_keys, type, resource, mode, ash_opts) do
+  defp process_row(row, line_no, headers, input_keys, type, resource, mode, ash_opts, retain_records?) do
     input = build_input(row, headers, input_keys)
 
     try do
@@ -140,7 +200,7 @@ defmodule AshCsvInterchange.Import.Orchestrator do
 
       case mode do
         :dry_run -> dry_run_outcome(changeset, line_no, input)
-        :commit -> commit_outcome(changeset, line_no, input)
+        :commit -> commit_outcome(changeset, line_no, input, retain_records?)
       end
     rescue
       exception ->
@@ -185,14 +245,14 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     end
   end
 
-  defp commit_outcome(changeset, line_no, input) do
+  defp commit_outcome(changeset, line_no, input, retain_records?) do
     case Ash.create(changeset) do
       {:ok, record} ->
         %RowOutcome{
           line_no: line_no,
           status: :ok,
           upsert_kind: upsert_kind(record),
-          record: record,
+          record: if(retain_records?, do: record),
           input: input
         }
 
@@ -219,57 +279,4 @@ defmodule AshCsvInterchange.Import.Orchestrator do
   defp classify(:eq), do: :created
   defp classify(:lt), do: :updated
   defp classify(:gt), do: :created
-
-  # Real-world exports (e.g. WellSky) sometimes emit headers that contain
-  # commas without RFC 4180 quoting, which would split the column into
-  # fragments at parse time. When a declared header contains a comma,
-  # locate it (case-insensitively) in the raw first line and wrap it in
-  # double quotes so NimbleCSV treats it as a single field. Headers that
-  # are already quoted, or that don't appear in the source, are left
-  # alone — HeaderCheck's existing RFC 4180 hint covers those cases.
-  defp preprocess_unquoted_headers(binary, headers_config) do
-    comma_headers =
-      (headers_config[:required] ++ headers_config[:optional])
-      |> Enum.map(&Headers.column_name/1)
-      |> Enum.filter(&String.contains?(&1, ","))
-
-    if comma_headers == [] do
-      binary
-    else
-      quote_known_comma_headers(binary, comma_headers)
-    end
-  end
-
-  defp quote_known_comma_headers(binary, comma_headers) do
-    case String.split(binary, ~r/(\r?\n)/, parts: 2, include_captures: true) do
-      [header_line, separator, rest] ->
-        Enum.reduce(comma_headers, header_line, &quote_header_if_present/2) <>
-          separator <>
-          rest
-
-      [header_line] ->
-        Enum.reduce(comma_headers, header_line, &quote_header_if_present/2)
-    end
-  end
-
-  defp quote_header_if_present(declared, line) do
-    if String.contains?(line, ~s("#{declared}")) do
-      # Already quoted — leave it alone.
-      line
-    else
-      pattern = Regex.compile!(Regex.escape(declared), "i")
-
-      case Regex.run(pattern, line, return: :index) do
-        [{start, length}] ->
-          prefix = binary_part(line, 0, start)
-          matched = binary_part(line, start, length)
-          suffix_start = start + length
-          suffix = binary_part(line, suffix_start, byte_size(line) - suffix_start)
-          prefix <> ~s("#{matched}") <> suffix
-
-        nil ->
-          line
-      end
-    end
-  end
 end
