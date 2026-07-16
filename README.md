@@ -68,6 +68,10 @@ AshCsvInterchange.import_csv(:contacts, csv_binary, mode: :commit)
 
 # Pass arguments to the export's read action with :input.
 {:ok, csv} = AshCsvInterchange.export_csv(:contacts, input: %{last_name: "Lovelace"})
+
+# Stream a large import lazily; rows commit as the stream is consumed.
+{:ok, %{outcomes: outcomes}} =
+  AshCsvInterchange.stream_import(:contacts, {:path, "/tmp/contacts.csv"}, mode: :commit)
 ```
 
 See the [online documentation](https://hexdocs.pm/ash_csv_interchange) for more.
