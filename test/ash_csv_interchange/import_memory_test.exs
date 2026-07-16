@@ -21,8 +21,13 @@ defmodule AshCsvInterchange.Import.MemoryTest do
     large = generate_csv(100_000)
     on_exit(fn -> Enum.each([small, large], &File.rm/1) end)
 
-    peak_small = peak_memory(fn -> import_file(small) end)
-    peak_large = peak_memory(fn -> import_file(large) end)
+    {peak_small, counts_small} = peak_memory(fn -> import_file(small) end)
+    {peak_large, counts_large} = peak_memory(fn -> import_file(large) end)
+
+    # The O(1) proof is only meaningful if every row was actually processed;
+    # otherwise a silently-broken import would masquerade as flat memory.
+    assert counts_small.total == 10_000 and counts_small.succeeded == 10_000
+    assert counts_large.total == 100_000 and counts_large.succeeded == 100_000
 
     # 10x the rows must not mean anywhere near 10x the peak heap. Factor is
     # generous to absorb GC/measurement noise; tighten only if it proves stable.
@@ -31,8 +36,10 @@ defmodule AshCsvInterchange.Import.MemoryTest do
   end
 
   defp import_file(path) do
-    {:ok, _report} =
+    {:ok, report} =
       Orchestrator.import_csv(TestResource, :test_resource, {:path, path}, mode: :dry_run)
+
+    report.counts
   end
 
   defp generate_csv(rows) do
@@ -48,13 +55,7 @@ defmodule AshCsvInterchange.Import.MemoryTest do
 
   defp peak_memory(fun) do
     test = self()
-
-    pid =
-      spawn(fn ->
-        fun.()
-        send(test, :worker_done)
-      end)
-
+    pid = spawn(fn -> send(test, {:worker_done, fun.()}) end)
     ref = Process.monitor(pid)
     sample(pid, ref, 0)
   end
@@ -67,7 +68,18 @@ defmodule AshCsvInterchange.Import.MemoryTest do
       end
 
     receive do
-      {:DOWN, ^ref, :process, _pid, _reason} -> peak
+      {:worker_done, result} ->
+        # Drain the trailing :DOWN so a later peak_memory/1 call can't match it.
+        receive do
+          {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+        after
+          5_000 -> :ok
+        end
+
+        {peak, result}
+
+      {:DOWN, ^ref, :process, _pid, reason} ->
+        flunk("memory worker died before completing the import: #{inspect(reason)}")
     after
       1 -> sample(pid, ref, peak)
     end
