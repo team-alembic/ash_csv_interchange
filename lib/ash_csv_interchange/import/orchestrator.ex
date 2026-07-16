@@ -1,25 +1,15 @@
 defmodule AshCsvInterchange.Import.Orchestrator do
   @moduledoc """
-  Drives the CSV import pipeline at runtime. Given a resource module,
-  a CSV type id, and a CSV source, `import_csv/4`:
+  Runs the CSV import pipeline. `import_csv/4` returns a bounded
+  `%RunReport{}`; `stream_import/4` returns lazy per-row outcomes.
 
-  1. Looks up the named `csv_import` entity on the resource via
-     `AshCsvInterchange.Info`. Missing extension or unknown id is fatal.
-  2. Parses the source via `Parser.parse_stream/2`, which reads the
-     header row eagerly (encoding errors, malformed CSV, and an empty
-     file short-circuit fatally) and returns the remaining data rows
-     as a lazy stream.
-  3. Validates the header row against the type's schema. Missing
-     required headers and duplicates are fatal; unknown columns become
-     warnings on the run report.
-  4. Walks each non-blank data row, building an Ash changeset for the
-     configured upsert action and either validating it (`:dry_run`) or
-     committing it (`:commit`). Per-row failures — validation errors,
-     action errors, raised exceptions — become `:invalid` / `:errored`
-     / `:crashed` outcomes; the run never aborts on one bad row.
-  5. Aggregates the per-row outcomes into a `%RunReport{}` with
-     summary counts and the file-level warnings collected along
-     the way.
+  Both resolve the named `csv_import` entity, parse via
+  `Parser.parse_stream/2` (the header is read eagerly, so encoding,
+  malformed-CSV, and empty-file errors short-circuit fatally), and
+  validate the header — missing or duplicate headers are fatal, unknown
+  columns become warnings. Each non-blank row is dispatched to the
+  configured upsert action; a per-row failure becomes an `:invalid`,
+  `:errored`, or `:crashed` outcome and never aborts the run.
   """
 
   alias AshCsvInterchange.{Error, Info}

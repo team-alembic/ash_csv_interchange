@@ -58,8 +58,7 @@ defmodule AshCsvInterchange.Import.Parser do
   empty file or a malformed header line.
 
   Invalid UTF-8 in a *data* row is not detected here; it raises
-  `#{inspect(__MODULE__)}.StreamError` when the body stream is consumed,
-  mirroring how the export side propagates mid-stream failures.
+  `#{inspect(__MODULE__)}.StreamError` when the body stream is consumed.
   """
   @spec parse_stream(source(), keyword()) ::
           {:ok, {[String.t()], Enumerable.t()}} | {:error, Error.t()}
@@ -111,10 +110,8 @@ defmodule AshCsvInterchange.Import.Parser do
     fixed = quote_known_comma_headers(first_line, comma_headers(headers_config))
 
     try do
-      case NimbleCSV.RFC4180.parse_string(fixed, skip_headers: false) do
-        [header_row | _] -> {:ok, header_row}
-        [] -> {:error, %Error{kind: :empty_file, message: "CSV file has no header row"}}
-      end
+      [header_row | _] = NimbleCSV.RFC4180.parse_string(fixed, skip_headers: false)
+      {:ok, header_row}
     rescue
       e in NimbleCSV.ParseError ->
         {:error, %Error{kind: :malformed_csv, message: Exception.message(e)}}
@@ -148,7 +145,6 @@ defmodule AshCsvInterchange.Import.Parser do
 
   defp quote_header_if_present(declared, line) do
     if String.contains?(line, ~s("#{declared}")) do
-      # Already quoted — leave it alone.
       line
     else
       pattern = Regex.compile!(Regex.escape(declared), "i")
