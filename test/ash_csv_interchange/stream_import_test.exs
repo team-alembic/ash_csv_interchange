@@ -83,6 +83,38 @@ defmodule AshCsvInterchange.Import.StreamImportTest do
       assert {:error, %Error{kind: :missing_required_headers}} =
                Orchestrator.stream_import(TestResource, :test_resource, "name\nAlice\n", mode: :dry_run)
     end
+
+    test "back-pressure: consuming N outcomes pulls only ~N rows from the source" do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+      # `Agent.start_link/1` links the counter to this test process. ExUnit
+      # exits the test process with reason `:shutdown` right after the test
+      # body returns, which — since the link is non-normal — kills the
+      # (non-trapping) Agent before `on_exit` callbacks run. Guard against
+      # that already-dead state instead of crashing `on_exit` on a noproc.
+      on_exit(fn -> if Process.alive?(counter), do: Agent.stop(counter) end)
+
+      raw =
+        Stream.concat(
+          ["external_id,name,date_of_birth\n"],
+          Stream.map(1..10_000, &"E#{&1},N#{&1},2020-01-01\n")
+        )
+
+      counted =
+        Stream.map(raw, fn chunk ->
+          Agent.update(counter, &(&1 + 1))
+          chunk
+        end)
+
+      assert {:ok, %StreamReport{outcomes: outcomes}} =
+               Orchestrator.stream_import(TestResource, :test_resource, counted, mode: :dry_run)
+
+      taken = outcomes |> Stream.take(10) |> Enum.to_list()
+
+      assert length(taken) == 10
+      # Header read enumerates once and the body re-enumerates; even so,
+      # producing 10 outcomes must not pull anywhere near all 10_000 rows.
+      assert Agent.get(counter, & &1) < 100
+    end
   end
 
   describe "import_csv/4 bounded report" do
