@@ -80,6 +80,10 @@ defmodule AshCsvInterchange.Import.Parser do
   end
 
   defp to_chunks(binary) when is_binary(binary), do: [binary]
+  # Opening a caller-supplied path is the whole point of the {:path, _} source;
+  # traversal safety is the caller's responsibility, so sobelow's File.stream!
+  # finding is a false positive here.
+  # sobelow_skip ["Traversal.FileModule"]
   defp to_chunks({:path, path}), do: File.stream!(path)
   defp to_chunks(enum), do: enum
 
