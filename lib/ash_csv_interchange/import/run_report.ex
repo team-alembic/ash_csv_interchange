@@ -71,26 +71,36 @@ defmodule AshCsvInterchange.Import.RunReport do
         }
 
   @doc """
+  Folds a single outcome into a `Counts` accumulator. Public so callers
+  folding a `stream_import/3` outcome stream can build the same aggregate
+  that the bounded `import_csv/3` report uses.
+  """
+  @spec tally(Counts.t(), RowOutcome.t()) :: Counts.t()
+  def tally(counts, outcome) do
+    counts = %{counts | total: counts.total + 1}
+
+    case outcome.status do
+      :ok ->
+        counts = %{counts | succeeded: counts.succeeded + 1}
+
+        case outcome.upsert_kind do
+          :created -> %{counts | created: counts.created + 1}
+          :updated -> %{counts | updated: counts.updated + 1}
+          _ -> counts
+        end
+
+      _ ->
+        %{counts | failed: counts.failed + 1}
+    end
+  end
+
+  @doc """
   Builds a `Counts` struct from a list of outcomes.
   """
   @spec counts_from_outcomes([RowOutcome.t()], non_neg_integer()) :: Counts.t()
   def counts_from_outcomes(outcomes, blank_rows_skipped) do
     Enum.reduce(outcomes, %Counts{blank_rows_skipped: blank_rows_skipped}, fn outcome, acc ->
-      acc = %{acc | total: acc.total + 1}
-
-      case outcome.status do
-        :ok ->
-          acc = %{acc | succeeded: acc.succeeded + 1}
-
-          case outcome.upsert_kind do
-            :created -> %{acc | created: acc.created + 1}
-            :updated -> %{acc | updated: acc.updated + 1}
-            _ -> acc
-          end
-
-        _ ->
-          %{acc | failed: acc.failed + 1}
-      end
+      tally(acc, outcome)
     end)
   end
 end

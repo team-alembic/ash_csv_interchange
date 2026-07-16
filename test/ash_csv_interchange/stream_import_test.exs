@@ -115,6 +115,13 @@ defmodule AshCsvInterchange.Import.StreamImportTest do
       # producing 10 outcomes must not pull anywhere near all 10_000 rows.
       assert Agent.get(counter, & &1) < 100
     end
+
+    test "returns :unreadable_source for a missing file path" do
+      path = Path.join(System.tmp_dir!(), "acc215_missing_#{System.unique_integer([:positive])}.csv")
+
+      assert {:error, %Error{kind: :unreadable_source}} =
+               Orchestrator.stream_import(TestResource, :test_resource, {:path, path}, mode: :dry_run)
+    end
   end
 
   describe "import_csv/4 bounded report" do

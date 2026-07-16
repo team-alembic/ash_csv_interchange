@@ -19,6 +19,7 @@ defmodule AshCsvInterchange.Error do
           | :duplicate_type_ids
           | :empty_file
           | :encoding
+          | :unreadable_source
           | :malformed_csv
           | :missing_required_headers
           | :duplicate_headers

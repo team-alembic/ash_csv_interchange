@@ -70,6 +70,8 @@ defmodule AshCsvInterchange.Import.Parser do
          {:ok, header_row} <- parse_header(first_line, headers_config) do
       body =
         chunks
+        # Required: parse_stream/2 is line-oriented, so a raw binary or a
+        # chunk boundary that splits mid-line would mis-parse without this.
         |> NimbleCSV.RFC4180.to_line_stream()
         |> NimbleCSV.RFC4180.parse_stream(skip_headers: true)
         |> Stream.map(&validate_row!/1)
@@ -97,6 +99,9 @@ defmodule AshCsvInterchange.Import.Parser do
       "" -> {:error, %Error{kind: :empty_file, message: "CSV file has no header row"}}
       line -> {:ok, line}
     end
+  rescue
+    e in File.Error ->
+      {:error, %Error{kind: :unreadable_source, message: Exception.message(e)}}
   end
 
   defp strip_bom(@utf8_bom <> rest), do: rest

@@ -54,6 +54,13 @@ defmodule AshCsvInterchange.Import.Orchestrator do
       outcomes (default `false`)
     * `:actor`, `:tenant`, `:authorize?`, `:scope` — forwarded to
       `Ash.Changeset.for_create/4` for every row.
+
+  In `:commit` mode rows are written as the input is consumed. If a
+  malformed-CSV or encoding error is encountered partway through the file,
+  rows before the failure are already committed and this returns
+  `{:error, %Error{}}` — the commit is not atomic across a mid-file parse
+  failure. Imports are idempotent upserts, so re-running the corrected file
+  converges. For large or untrusted input prefer `stream_import/4`.
   """
   @spec import_csv(module(), atom(), Parser.source(), keyword()) ::
           {:ok, RunReport.t()} | {:error, Error.t()}
@@ -95,7 +102,7 @@ defmodule AshCsvInterchange.Import.Orchestrator do
           {retained, kept, %{counts | blank_rows_skipped: counts.blank_rows_skipped + 1}}
 
         {:outcome, outcome}, {retained, kept, counts} ->
-          counts = tally(counts, outcome)
+          counts = RunReport.tally(counts, outcome)
 
           if kept < max_outcomes do
             {[outcome | retained], kept + 1, counts}
@@ -105,24 +112,6 @@ defmodule AshCsvInterchange.Import.Orchestrator do
       end)
 
     {retained, counts}
-  end
-
-  defp tally(counts, outcome) do
-    counts = %{counts | total: counts.total + 1}
-
-    case outcome.status do
-      :ok ->
-        counts = %{counts | succeeded: counts.succeeded + 1}
-
-        case outcome.upsert_kind do
-          :created -> %{counts | created: counts.created + 1}
-          :updated -> %{counts | updated: counts.updated + 1}
-          _ -> counts
-        end
-
-      _ ->
-        %{counts | failed: counts.failed + 1}
-    end
   end
 
   @doc """

@@ -119,5 +119,10 @@ defmodule AshCsvInterchange.Import.ParserTest do
 
       assert_raise Parser.StreamError, fn -> Enum.to_list(body) end
     end
+
+    test "returns :unreadable_source for a nonexistent {:path, _}" do
+      path = Path.join(System.tmp_dir!(), "acc215_missing_#{System.unique_integer([:positive])}.csv")
+      assert {:error, %Error{kind: :unreadable_source}} = Parser.parse_stream({:path, path}, @headers)
+    end
   end
 end
