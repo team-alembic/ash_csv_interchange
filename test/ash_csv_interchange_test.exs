@@ -12,7 +12,7 @@ defmodule AshCsvInterchangeTest do
     TestResource
   }
 
-  alias AshCsvInterchange.Import.{RowOutcome, RunReport}
+  alias AshCsvInterchange.Import.{RowOutcome, RunReport, StreamReport}
 
   setup_all do
     original = Application.get_env(:ash_csv_interchange, AshCsvInterchange, [])
@@ -85,6 +85,42 @@ defmodule AshCsvInterchangeTest do
 
       assert {:ok, %RunReport{outcomes: [%RowOutcome{status: :ok}]}} =
                AshCsvInterchange.import_csv(:test_resource, csv, mode: :commit)
+    end
+  end
+
+  describe "stream_import/3 and import_csv/3 sources" do
+    test "stream_import/3 resolves the type and streams outcomes" do
+      csv = "external_id,name,date_of_birth\nE1,Alice,2020-01-15\n"
+
+      assert {:ok, %StreamReport{outcomes: outcomes}} =
+               AshCsvInterchange.stream_import(:test_resource, csv, mode: :dry_run)
+
+      assert [%RowOutcome{line_no: 2, status: :ok}] = Enum.to_list(outcomes)
+    end
+
+    test "stream_import/3 returns type_not_found for an unregistered id" do
+      assert {:error, %AshCsvInterchange.Error{kind: :type_not_found}} =
+               AshCsvInterchange.stream_import(:nope, "a\nb\n")
+    end
+
+    test "import_csv/3 accepts a {:path, _} source" do
+      path = Path.join(System.tmp_dir!(), "acc215_pub_#{System.unique_integer([:positive])}.csv")
+      File.write!(path, "external_id,name,date_of_birth\nE1,Alice,2020-01-15\n")
+      on_exit(fn -> File.rm(path) end)
+
+      assert {:ok, %RunReport{counts: counts}} =
+               AshCsvInterchange.import_csv(:test_resource, {:path, path}, mode: :dry_run)
+
+      assert counts.total == 1
+    end
+
+    test "import_csv/3 accepts an arbitrary chunk stream" do
+      chunks = ["external_id,name,date_of_birth\n", "E1,Alice,2020-01-15\n"]
+
+      assert {:ok, %RunReport{counts: counts}} =
+               AshCsvInterchange.import_csv(:test_resource, chunks, mode: :dry_run)
+
+      assert counts.total == 1
     end
   end
 

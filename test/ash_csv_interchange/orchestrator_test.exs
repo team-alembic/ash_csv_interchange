@@ -216,7 +216,7 @@ defmodule AshCsvInterchange.Import.OrchestratorTest do
       """
 
       assert {:ok, %RunReport{outcomes: [%RowOutcome{record: record}]}} =
-               Orchestrator.import_csv(TestResource, :test_resource, csv, mode: :commit)
+               Orchestrator.import_csv(TestResource, :test_resource, csv, mode: :commit, retain_records?: true)
 
       assert record.source == :csv
     end
@@ -254,7 +254,8 @@ defmodule AshCsvInterchange.Import.OrchestratorTest do
       assert {:ok, %RunReport{outcomes: [%RowOutcome{record: record}]}} =
                Orchestrator.import_csv(ActorAwareResource, :actor_aware, csv,
                  mode: :commit,
-                 actor: actor
+                 actor: actor,
+                 retain_records?: true
                )
 
       assert record.imported_by == "actor-123"
@@ -264,7 +265,10 @@ defmodule AshCsvInterchange.Import.OrchestratorTest do
       csv = "name\nBob\n"
 
       assert {:ok, %RunReport{outcomes: [%RowOutcome{record: record}]}} =
-               Orchestrator.import_csv(ActorAwareResource, :actor_aware, csv, mode: :commit)
+               Orchestrator.import_csv(ActorAwareResource, :actor_aware, csv,
+                 mode: :commit,
+                 retain_records?: true
+               )
 
       assert record.imported_by == nil
     end
@@ -285,7 +289,7 @@ defmodule AshCsvInterchange.Import.OrchestratorTest do
       csv = "name\nAlice\n"
 
       # credo:disable-for-next-line AshCredo.Check.Warning.AuthorizeFalse
-      opts = [mode: :commit, actor: %{id: "anyone"}, authorize?: false]
+      opts = [mode: :commit, actor: %{id: "anyone"}, authorize?: false, retain_records?: true]
 
       assert {:ok, %RunReport{outcomes: [%RowOutcome{status: :ok, record: record}]}} =
                Orchestrator.import_csv(LockedResource, :locked, csv, opts)
@@ -301,7 +305,8 @@ defmodule AshCsvInterchange.Import.OrchestratorTest do
       assert {:ok, %RunReport{outcomes: [%RowOutcome{record: record}]}} =
                Orchestrator.import_csv(TenantAwareResource, :tenant_aware, csv,
                  mode: :commit,
-                 tenant: "tenant-acme"
+                 tenant: "tenant-acme",
+                 retain_records?: true
                )
 
       assert record.captured_tenant == "tenant-acme"

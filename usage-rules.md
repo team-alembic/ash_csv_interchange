@@ -56,12 +56,34 @@ missing-argument error when `:input` is omitted:
   )
 ```
 
+```elixir
+# Stream a large import so the file is never fully resident, committing
+# rows as the stream is consumed (ideal for progressive UI or Oban chunks).
+{:ok, %{outcomes: outcomes}} =
+  AshCsvInterchange.stream_import(:contacts, {:path, "/tmp/contacts.csv"}, mode: :commit)
+
+Enum.each(outcomes, &handle_outcome/1)
+```
+
 ## Anti-patterns
 
 - Do **not** reuse the same `:id` across resources in one configured domain set
   — duplicate ids raise at registry-resolution time.
 - Avoid loading a whole export into memory with `export_csv/2` for large data
   sets; prefer `stream_export/2`, which streams batches.
+- For large imports, prefer `stream_import/3` over `import_csv/3`. `import_csv/3`
+  returns a **bounded** `%RunReport{}` — exact counts, but only the first
+  `:max_outcomes` (default 100) per-row outcomes and no Ash `record` unless you
+  pass `retain_records?: true`. If you need every failure (e.g. to build an
+  error CSV), fold the `stream_import/3` outcome stream yourself.
+- Streaming sources must be **re-enumerable** (a binary, `{:path, path}`, a
+  `File.Stream`, a list, or a `Stream` over a re-runnable producer). One-shot
+  sources (a consumed network body) are not supported — write them to a file
+  and pass `{:path, path}`.
+- `import_csv/3` in `:commit` mode is not atomic across a mid-file parse
+  error: rows before a malformed/invalid-UTF-8 row are already committed when
+  it returns `{:error, _}`. Imports are idempotent upserts, so re-running the
+  fixed file is safe.
 
 ## See also
 

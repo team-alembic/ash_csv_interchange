@@ -2,8 +2,11 @@ defmodule AshCsvInterchange.Import.RunReport do
   @moduledoc """
   Structured result of a CSV import run.
 
-  `outcomes` is an eager list (not a stream). `counts` is computed once
-  at the end of the run from `outcomes`.
+  `counts` is exact over every row. `outcomes` is a **bounded preview** —
+  the first `:max_outcomes` row outcomes (default 100); `outcomes_truncated?`
+  is `true` when more rows were processed than retained. Callers needing
+  every per-row outcome should use `AshCsvInterchange.stream_import/3` and
+  fold the lazy stream themselves.
   """
 
   alias AshCsvInterchange.Error
@@ -37,6 +40,7 @@ defmodule AshCsvInterchange.Import.RunReport do
     :resource,
     :type_id,
     :outcomes,
+    :outcomes_truncated?,
     :warnings,
     :counts,
     :source_headers,
@@ -47,6 +51,7 @@ defmodule AshCsvInterchange.Import.RunReport do
     :resource,
     :type_id,
     :outcomes,
+    :outcomes_truncated?,
     :warnings,
     :counts,
     :source_headers,
@@ -58,6 +63,7 @@ defmodule AshCsvInterchange.Import.RunReport do
           resource: module(),
           type_id: atom(),
           outcomes: [RowOutcome.t()],
+          outcomes_truncated?: boolean(),
           warnings: [Error.t()],
           counts: Counts.t(),
           source_headers: [String.t()],
@@ -65,26 +71,36 @@ defmodule AshCsvInterchange.Import.RunReport do
         }
 
   @doc """
+  Folds a single outcome into a `Counts` accumulator. Public so callers
+  folding a `stream_import/3` outcome stream can build the same aggregate
+  that the bounded `import_csv/3` report uses.
+  """
+  @spec tally(Counts.t(), RowOutcome.t()) :: Counts.t()
+  def tally(counts, outcome) do
+    counts = %{counts | total: counts.total + 1}
+
+    case outcome.status do
+      :ok ->
+        counts = %{counts | succeeded: counts.succeeded + 1}
+
+        case outcome.upsert_kind do
+          :created -> %{counts | created: counts.created + 1}
+          :updated -> %{counts | updated: counts.updated + 1}
+          _ -> counts
+        end
+
+      _ ->
+        %{counts | failed: counts.failed + 1}
+    end
+  end
+
+  @doc """
   Builds a `Counts` struct from a list of outcomes.
   """
   @spec counts_from_outcomes([RowOutcome.t()], non_neg_integer()) :: Counts.t()
   def counts_from_outcomes(outcomes, blank_rows_skipped) do
     Enum.reduce(outcomes, %Counts{blank_rows_skipped: blank_rows_skipped}, fn outcome, acc ->
-      acc = %{acc | total: acc.total + 1}
-
-      case outcome.status do
-        :ok ->
-          acc = %{acc | succeeded: acc.succeeded + 1}
-
-          case outcome.upsert_kind do
-            :created -> %{acc | created: acc.created + 1}
-            :updated -> %{acc | updated: acc.updated + 1}
-            _ -> acc
-          end
-
-        _ ->
-          %{acc | failed: acc.failed + 1}
-      end
+      tally(acc, outcome)
     end)
   end
 end
