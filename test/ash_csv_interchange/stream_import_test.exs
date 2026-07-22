@@ -30,11 +30,17 @@ defmodule AshCsvInterchange.Import.StreamImportTest do
     end
 
     test "is lazy: an unbounded source commits only the rows consumed" do
+      # batch_size: 1 pins the commit granularity to one row per write, so
+      # taking 5 outcomes provably touches only 5 rows. Batched laziness
+      # (bounded to one batch's worth at a time) is covered separately below.
       rows = Stream.map(Stream.iterate(1, &(&1 + 1)), &"E#{&1},N#{&1},2020-01-01\n")
       source = Stream.concat(["external_id,name,date_of_birth\n"], rows)
 
       assert {:ok, %StreamReport{outcomes: outcomes}} =
-               Orchestrator.stream_import(TestResource, :test_resource, source, mode: :commit)
+               Orchestrator.stream_import(TestResource, :test_resource, source,
+                 mode: :commit,
+                 batch_size: 1
+               )
 
       taken = outcomes |> Stream.take(5) |> Enum.to_list()
 
@@ -50,7 +56,8 @@ defmodule AshCsvInterchange.Import.StreamImportTest do
       assert {:ok, %StreamReport{outcomes: outcomes}} =
                Orchestrator.stream_import(TestResource, :test_resource, csv, mode: :commit)
 
-      assert [%RowOutcome{status: :ok, record: nil, upsert_kind: :created}] = Enum.to_list(outcomes)
+      assert [%RowOutcome{status: :ok, record: nil, upsert_kind: :created}] =
+               Enum.to_list(outcomes)
     end
 
     test "retains the record when retain_records?: true" do
@@ -117,7 +124,8 @@ defmodule AshCsvInterchange.Import.StreamImportTest do
     end
 
     test "returns :unreadable_source for a missing file path" do
-      path = Path.join(System.tmp_dir!(), "acc215_missing_#{System.unique_integer([:positive])}.csv")
+      path =
+        Path.join(System.tmp_dir!(), "acc215_missing_#{System.unique_integer([:positive])}.csv")
 
       assert {:error, %Error{kind: :unreadable_source}} =
                Orchestrator.stream_import(TestResource, :test_resource, {:path, path}, mode: :dry_run)

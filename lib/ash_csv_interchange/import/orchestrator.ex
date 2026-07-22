@@ -10,6 +10,13 @@ defmodule AshCsvInterchange.Import.Orchestrator do
   columns become warnings. Each non-blank row is dispatched to the
   configured upsert action; a per-row failure becomes an `:invalid`,
   `:errored`, or `:crashed` outcome and never aborts the run.
+
+  In `:commit` mode with `batch_size > 1`, rows are chunked and dispatched
+  via `Ash.bulk_create/4` so a batch costs one write round-trip instead of
+  one per row. Any row a batch didn't clearly succeed on — invalid input,
+  a data-layer error, a crash, or an aborted batch — is re-committed
+  through the single-row path, so outcomes stay identical to `batch_size:
+  1` regardless of why the batch didn't take it all the way.
   """
 
   alias AshCsvInterchange.{Error, Info}
@@ -24,8 +31,11 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     StreamReport
   }
 
+  require Logger
+
   @ash_forwarded_opts [:actor, :tenant, :authorize?, :scope]
   @default_max_outcomes 100
+  @default_batch_size 100
 
   @doc """
   Parses a CSV source and dispatches each non-blank row to the resource's
@@ -42,6 +52,10 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     * `:max_outcomes` — retained outcome preview size (default `100`)
     * `:retain_records?` — keep the full Ash `record` on committed
       outcomes (default `false`)
+    * `:batch_size` — commit-mode rows per `Ash.bulk_create/4` dispatch
+      (default `100`). `batch_size: 1` commits one row per write
+      round-trip, identical to pre-batching behaviour. Ignored in
+      `:dry_run` mode.
     * `:actor`, `:tenant`, `:authorize?`, `:scope` — forwarded to
       `Ash.Changeset.for_create/4` for every row.
 
@@ -115,7 +129,10 @@ defmodule AshCsvInterchange.Import.Orchestrator do
 
   Accepts the same `source` shapes and options as `import_csv/4`, plus
   `:retain_records?` (default `false`) controlling whether committed
-  outcomes carry the full Ash `record`.
+  outcomes carry the full Ash `record`, and `:batch_size` (default `100`)
+  controlling how many rows are dispatched per `Ash.bulk_create/4` call in
+  `:commit` mode. The returned stream yields outcomes one batch at a time
+  — it never buffers more than one batch's worth of rows.
   """
   @spec stream_import(module(), atom(), Parser.source(), keyword()) ::
           {:ok, StreamReport.t()} | {:error, Error.t()}
@@ -142,6 +159,7 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     mode = Keyword.get(opts, :mode, :dry_run)
     ash_opts = Keyword.take(opts, @ash_forwarded_opts)
     retain_records? = Keyword.get(opts, :retain_records?, false)
+    batch_size = Keyword.get(opts, :batch_size, @default_batch_size)
 
     with {:ok, type} <- fetch_type(resource, id),
          {:ok, {header_row, body}} <- Parser.parse_stream(source, type.headers),
@@ -150,33 +168,49 @@ defmodule AshCsvInterchange.Import.Orchestrator do
       input_keys = build_input_keys(type.headers)
 
       events =
-        event_stream(body, headers, input_keys, type, resource, mode, ash_opts, retain_records?)
+        event_stream(
+          body,
+          headers,
+          input_keys,
+          type,
+          resource,
+          mode,
+          ash_opts,
+          retain_records?,
+          batch_size
+        )
 
       {:ok, {type, warnings, header_row, input_keys, events}}
     end
   end
 
-  defp event_stream(body, headers, input_keys, type, resource, mode, ash_opts, retain_records?) do
-    body
-    |> Stream.with_index(2)
-    |> Stream.map(fn {row, line_no} ->
-      if blank_row?(row) do
-        {:blank, line_no}
-      else
-        {:outcome,
-         process_row(
-           row,
-           line_no,
-           headers,
-           input_keys,
-           type,
-           resource,
-           mode,
-           ash_opts,
-           retain_records?
-         )}
-      end
-    end)
+  defp event_stream(body, headers, input_keys, type, resource, mode, ash_opts, retain_records?, batch_size) do
+    numbered_rows = Stream.with_index(body, 2)
+
+    if mode == :commit and batch_size > 1 do
+      numbered_rows
+      |> Stream.chunk_every(batch_size)
+      |> Stream.flat_map(&process_commit_batch(&1, headers, input_keys, type, resource, ash_opts, retain_records?))
+    else
+      Stream.map(numbered_rows, fn {row, line_no} ->
+        if blank_row?(row) do
+          {:blank, line_no}
+        else
+          {:outcome,
+           process_row(
+             row,
+             line_no,
+             headers,
+             input_keys,
+             type,
+             resource,
+             mode,
+             ash_opts,
+             retain_records?
+           )}
+        end
+      end)
+    end
   end
 
   defp fetch_type(resource, id) do
@@ -218,32 +252,220 @@ defmodule AshCsvInterchange.Import.Orchestrator do
 
   defp process_row(row, line_no, headers, input_keys, type, resource, mode, ash_opts, retain_records?) do
     input = build_input(row, headers, input_keys)
+    process_input(input, line_no, type, resource, mode, ash_opts, retain_records?)
+  end
 
-    try do
-      changeset =
-        resource
-        |> Ash.Changeset.for_create(type.upsert_action, input, ash_opts)
-        |> apply_import_source(type.import_source)
+  defp process_input(input, line_no, type, resource, mode, ash_opts, retain_records?) do
+    changeset =
+      resource
+      |> Ash.Changeset.for_create(type.upsert_action, input, ash_opts)
+      |> apply_import_source(type.import_source)
 
-      case mode do
-        :dry_run -> dry_run_outcome(changeset, line_no, input)
-        :commit -> commit_outcome(changeset, line_no, input, retain_records?)
-      end
-    rescue
-      exception ->
-        %RowOutcome{
-          line_no: line_no,
-          status: :crashed,
-          errors: [
-            %Error{
-              kind: :transform_crashed,
-              message: Exception.message(exception),
-              context: %{exception: inspect(exception.__struct__)}
-            }
-          ],
-          input: input
-        }
+    case mode do
+      :dry_run -> dry_run_outcome(changeset, line_no, input)
+      :commit -> commit_outcome(changeset, line_no, input, retain_records?)
     end
+  rescue
+    exception ->
+      %RowOutcome{
+        line_no: line_no,
+        status: :crashed,
+        errors: [
+          %Error{
+            kind: :transform_crashed,
+            message: Exception.message(exception),
+            context: %{exception: inspect(exception.__struct__)}
+          }
+        ],
+        input: input
+      }
+  end
+
+  # Batches are dispatched with `Ash.bulk_create/4`, but the row-level
+  # outcome for anything the batch didn't cleanly persist — an invalid
+  # row, a data-layer error, a raised exception, or the whole batch
+  # aborting — is produced by re-running `process_input/7` for that row
+  # alone. This keeps every such failure mode converging on the exact
+  # same outcome `batch_size: 1` would have produced, without needing to
+  # parse `Ash.bulk_create/4`'s internal error/index representation.
+  #
+  # Rows sharing an upsert identity within the same batch are pulled out
+  # of the bulk dispatch entirely and committed sequentially through that
+  # same per-row fallback instead. A single `INSERT ... ON CONFLICT`
+  # covering both rows would have Postgres reject the whole statement
+  # ("cannot affect row a second time"), and even data layers that don't
+  # raise can't be trusted to apply "last row wins" across two changesets
+  # for the same identity in one batch — sequential per-row commits are
+  # the only way to reproduce that guarantee.
+  defp process_commit_batch(chunk, headers, input_keys, type, resource, ash_opts, retain_records?) do
+    prepared =
+      Enum.map(chunk, fn {row, line_no} ->
+        if blank_row?(row) do
+          {:blank, line_no}
+        else
+          {:row, line_no, build_input(row, headers, input_keys)}
+        end
+      end)
+
+    rows = for {:row, line_no, input} <- prepared, do: {line_no, input}
+    identity_keys = upsert_identity_keys(resource, type.upsert_action)
+    {bulk_rows, fallback_line_nos} = partition_by_identity(rows, identity_keys)
+    successes = bulk_commit(bulk_rows, type, resource, ash_opts, identity_keys)
+
+    {outcomes, _bulk_index} =
+      Enum.map_reduce(prepared, 0, fn
+        {:blank, line_no}, bulk_index ->
+          {{:blank, line_no}, bulk_index}
+
+        {:row, line_no, input}, bulk_index ->
+          if MapSet.member?(fallback_line_nos, line_no) do
+            outcome =
+              process_input(input, line_no, type, resource, :commit, ash_opts, retain_records?)
+
+            {{:outcome, outcome}, bulk_index}
+          else
+            outcome =
+              case Map.fetch(successes, bulk_index) do
+                {:ok, record} ->
+                  success_outcome(line_no, input, record, retain_records?)
+
+                :error ->
+                  process_input(
+                    input,
+                    line_no,
+                    type,
+                    resource,
+                    :commit,
+                    ash_opts,
+                    retain_records?
+                  )
+              end
+
+            {{:outcome, outcome}, bulk_index + 1}
+          end
+      end)
+
+    outcomes
+  end
+
+  defp partition_by_identity(rows, identity_keys) do
+    tagged =
+      Enum.map(rows, fn {line_no, input} ->
+        {line_no, input, identity_group_key(input, identity_keys)}
+      end)
+
+    duplicate_keys =
+      tagged
+      |> Enum.group_by(fn {_line_no, _input, key} -> key end)
+      |> Enum.filter(fn {key, members} -> key != :unknown and length(members) > 1 end)
+      |> MapSet.new(fn {key, _members} -> key end)
+
+    {bulk_rows, fallback_line_nos} =
+      Enum.reduce(tagged, {[], MapSet.new()}, fn {line_no, input, key}, {bulk_rows, fallback_line_nos} ->
+        if MapSet.member?(duplicate_keys, key) do
+          {bulk_rows, MapSet.put(fallback_line_nos, line_no)}
+        else
+          {[{line_no, input} | bulk_rows], fallback_line_nos}
+        end
+      end)
+
+    {Enum.reverse(bulk_rows), fallback_line_nos}
+  end
+
+  # `identity_keys` are always argument names or accepted-attribute names
+  # of the upsert action (enforced at compile time by
+  # `ValidateImportAction`), so they resolve directly against the row's
+  # input map. A row whose identity value can't be determined this way
+  # (e.g. populated by a change instead of a header) reports `:unknown`
+  # rather than being grouped with every other such row as if they shared
+  # one identity.
+  defp identity_group_key(input, identity_keys) do
+    values = Enum.map(identity_keys, &Map.get(input, &1))
+
+    if Enum.all?(values, &is_nil/1) do
+      :unknown
+    else
+      values
+    end
+  end
+
+  defp bulk_commit([], _type, _resource, _ash_opts, _identity_keys), do: %{}
+
+  defp bulk_commit(rows, type, resource, ash_opts, identity_keys) do
+    inputs = Enum.map(rows, fn {_line_no, input} -> input end)
+
+    inputs
+    |> Ash.bulk_create(
+      resource,
+      type.upsert_action,
+      bulk_create_opts(ash_opts, type, resource, identity_keys)
+    )
+    |> successes_by_index()
+  rescue
+    # every row falls back to the per-row path, so outcomes stay correct —
+    # but a raise here on each batch silently forfeits the batching win,
+    # so make it visible
+    exception ->
+      Logger.warning(
+        "Ash.bulk_create raised; falling back to per-row commits for this batch: " <>
+          inspect(exception.__struct__)
+      )
+
+      %{}
+  end
+
+  defp bulk_create_opts(ash_opts, type, resource, identity_keys) do
+    Keyword.merge(ash_opts,
+      upsert?: true,
+      upsert_fields: default_upsert_fields(resource, identity_keys),
+      stop_on_error?: false,
+      return_records?: true,
+      return_errors?: false,
+      transform_changeset: fn changeset -> apply_import_source(changeset, type.import_source) end
+    )
+  end
+
+  # Ash.bulk_create/4 requires upsert_fields to be given explicitly (unlike
+  # single-row Ash.create/1, which infers it from the changeset). A plain
+  # list of every attribute but the identity, the primary key, and
+  # `update_default` attributes (e.g. `updated_at`) mirrors what a
+  # per-row upsert changes on conflict.
+  #
+  # `update_default` attributes are deliberately left out: naming one
+  # here would make `Ash.Changeset.set_on_upsert/2` read its value
+  # straight off the create changeset (the same instant as
+  # `inserted_at`) instead of recomputing it as an update default —
+  # silently losing the create/update distinction `upsert_kind/1` relies
+  # on.
+  defp default_upsert_fields(resource, identity_keys) do
+    exclude = identity_keys ++ Ash.Resource.Info.primary_key(resource)
+
+    resource
+    |> Ash.Resource.Info.attributes()
+    |> Enum.reject(&(&1.name in exclude or &1.update_default != nil))
+    |> Enum.map(& &1.name)
+  end
+
+  defp upsert_identity_keys(resource, upsert_action) do
+    action = Ash.Resource.Info.action(resource, upsert_action)
+    identity = Ash.Resource.Info.identity(resource, action.upsert_identity)
+    identity.keys
+  end
+
+  defp successes_by_index(%Ash.BulkResult{records: nil}), do: %{}
+
+  defp successes_by_index(%Ash.BulkResult{records: records}) do
+    Map.new(records, fn record -> {record.__metadata__.bulk_create_index, record} end)
+  end
+
+  defp success_outcome(line_no, input, record, retain_records?) do
+    %RowOutcome{
+      line_no: line_no,
+      status: :ok,
+      upsert_kind: upsert_kind(record),
+      record: if(retain_records?, do: record),
+      input: input
+    }
   end
 
   defp build_input(row, headers, input_keys) do

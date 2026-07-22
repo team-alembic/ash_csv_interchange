@@ -323,3 +323,73 @@ defmodule AshCsvInterchange.TenantAwareResource do
     identity :name, [:name], pre_check_with: AshCsvInterchange.TenantAwareDomain
   end
 end
+
+defmodule AshCsvInterchange.DbErrorDomain do
+  @moduledoc false
+  use Ash.Domain, validate_config_inclusion?: false
+
+  resources do
+    resource AshCsvInterchange.DbErrorResource
+  end
+end
+
+defmodule AshCsvInterchange.DbErrorResource do
+  @moduledoc """
+  Test action whose `before_action` hook rejects `name: "reject"` right
+  before the write, simulating a data-layer-level failure (e.g. a
+  constraint violation) rather than a validation error caught while the
+  changeset is being built. Used by the batched-commit test to prove a
+  row that fails at this later stage still leaves its batch-mates
+  committed.
+  """
+
+  use Ash.Resource,
+    domain: AshCsvInterchange.DbErrorDomain,
+    data_layer: Ash.DataLayer.Ets,
+    extensions: [AshCsvInterchange]
+
+  ets do
+    private? true
+  end
+
+  csv_imports do
+    csv_import :db_error do
+      label("DB Error")
+      headers(required: ["name"], optional: [])
+      upsert_action(:create_action)
+    end
+  end
+
+  actions do
+    defaults [:read]
+
+    create :create_action do
+      description "Test action that fails post-validation for name=reject"
+      upsert? true
+      upsert_identity :name
+      argument :name, :string
+      change set_attribute(:name, arg(:name))
+
+      change before_action(fn changeset, _context ->
+               if Ash.Changeset.get_attribute(changeset, :name) == "reject" do
+                 Ash.Changeset.add_error(
+                   changeset,
+                   Ash.Error.Changes.InvalidChanges.exception(message: "rejected at the data layer")
+                 )
+               else
+                 changeset
+               end
+             end)
+    end
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :name, :string, allow_nil?: false
+    timestamps()
+  end
+
+  identities do
+    identity :name, [:name], pre_check_with: AshCsvInterchange.DbErrorDomain
+  end
+end
