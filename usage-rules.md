@@ -80,6 +80,10 @@ Enum.each(outcomes, &handle_outcome/1)
   `File.Stream`, a list, or a `Stream` over a re-runnable producer). One-shot
   sources (a consumed network body) are not supported — write them to a file
   and pass `{:path, path}`.
+- `:commit` mode batches writes through `Ash.bulk_create/4` (`batch_size:`
+  option, default 100). Outcomes are identical to per-row commits — rows a
+  batch can't cleanly persist fall back to the single-row path — so only set
+  `batch_size: 1` when you specifically need one write round-trip per row.
 - `import_csv/3` in `:commit` mode is not atomic across a mid-file parse
   error: rows before a malformed/invalid-UTF-8 row are already committed when
   it returns `{:error, _}`. Imports are idempotent upserts, so re-running the
