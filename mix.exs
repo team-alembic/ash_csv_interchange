@@ -25,11 +25,16 @@ defmodule AshCsvInterchange.MixProject do
         plt_core_path: "priv/plts",
         plt_file: {:no_warn, "priv/plts/dialyzer.plt"}
       ],
-      preferred_cli_env: [
+      usage_rules: usage_rules()
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
         ci: :test,
         "test.coverage": :test
-      ],
-      usage_rules: usage_rules()
+      ]
     ]
   end
 
