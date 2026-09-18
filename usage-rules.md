@@ -71,11 +71,11 @@ Enum.each(outcomes, &handle_outcome/1)
   — duplicate ids raise at registry-resolution time.
 - Avoid loading a whole export into memory with `export_csv/2` for large data
   sets; prefer `stream_export/2`, which streams batches.
-- For large imports, prefer `stream_import/3` over `import_csv/3`. `import_csv/3`
-  returns a **bounded** `%RunReport{}` — exact counts, but only the first
-  `:max_outcomes` (default 100) per-row outcomes and no Ash `record` unless you
-  pass `retain_records?: true`. If you need every failure (e.g. to build an
-  error CSV), fold the `stream_import/3` outcome stream yourself.
+- For large imports, prefer `stream_import/3` over `import_csv/3`. The
+  `%RunReport{}` from `import_csv/3` is **bounded**: counts are exact, but it
+  keeps only the first `:max_outcomes` outcomes (default 100), and no Ash
+  `record` unless you pass `retain_records?: true`. To see every failure — to
+  build an error CSV, say — fold the `stream_import/3` outcome stream yourself.
 - Streaming sources must be **re-enumerable** (a binary, `{:path, path}`, a
   `File.Stream`, a list, or a `Stream` over a re-runnable producer). One-shot
   sources (a consumed network body) are not supported — write them to a file
@@ -84,10 +84,9 @@ Enum.each(outcomes, &handle_outcome/1)
   option, default 100). Outcomes are identical to per-row commits — rows a
   batch can't cleanly persist fall back to the single-row path — so only set
   `batch_size: 1` when you specifically need one write round-trip per row.
-- `import_csv/3` in `:commit` mode is not atomic across a mid-file parse
-  error: rows before a malformed/invalid-UTF-8 row are already committed when
-  it returns `{:error, _}`. Imports are idempotent upserts, so re-running the
-  fixed file is safe.
+- `import_csv/3` in `:commit` mode is not atomic. Rows before a malformed or
+  invalid-UTF-8 row are already committed when it returns `{:error, _}`.
+  Imports are idempotent upserts, so re-running the fixed file is safe.
 
 ## See also
 
