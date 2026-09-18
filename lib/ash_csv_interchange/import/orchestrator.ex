@@ -1,15 +1,16 @@
 defmodule AshCsvInterchange.Import.Orchestrator do
   @moduledoc """
   Runs the CSV import pipeline. `import_csv/4` returns a bounded
-  `%RunReport{}`; `stream_import/4` returns lazy per-row outcomes.
+  `%RunReport{}`. `stream_import/4` returns lazy per-row outcomes.
 
-  Both resolve the named `csv_import` entity, parse via
-  `Parser.parse_stream/2` (the header is read eagerly, so encoding,
-  malformed-CSV, and empty-file errors short-circuit fatally), and
-  validate the header — missing or duplicate headers are fatal, unknown
-  columns become warnings. Each non-blank row is dispatched to the
-  configured upsert action; a per-row failure becomes an `:invalid`,
-  `:errored`, or `:crashed` outcome and never aborts the run.
+  Both resolve the named `csv_import` entity, then parse with
+  `Parser.parse_stream/2`. The header is read eagerly, so encoding,
+  malformed-CSV, empty-file, missing-header and duplicate-header errors
+  are all fatal. Unknown columns become warnings.
+
+  Each non-blank row goes to the configured upsert action. A failing row
+  becomes an `:invalid`, `:errored` or `:crashed` outcome and never
+  aborts the run.
 
   In `:commit` mode with `batch_size > 1`, rows are chunked and dispatched
   via `Ash.bulk_create/4` so a batch costs one write round-trip instead of
@@ -38,13 +39,13 @@ defmodule AshCsvInterchange.Import.Orchestrator do
   @default_batch_size 100
 
   @doc """
-  Parses a CSV source and dispatches each non-blank row to the resource's
-  configured upsert action for the named type. Returns a bounded
-  `%RunReport{}`: `counts` is exact, `outcomes` is a preview capped at
-  `:max_outcomes`, and `outcomes_truncated?` flags when rows exceeded it.
+  Parses a CSV source and sends each non-blank row to the type's upsert
+  action. Returns a bounded `%RunReport{}`: `counts` is exact, `outcomes`
+  is capped at `:max_outcomes`, and `outcomes_truncated?` marks when rows
+  exceeded the cap.
 
-  The `source` may be a binary, a `{:path, path}` tuple, or a
-  re-enumerable `Enumerable` of binary chunks.
+  The `source` is a binary, a `{:path, path}` tuple, or a re-enumerable
+  `Enumerable` of binary chunks.
 
   Options:
 
@@ -59,12 +60,11 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     * `:actor`, `:tenant`, `:authorize?`, `:scope` — forwarded to
       `Ash.Changeset.for_create/4` for every row.
 
-  In `:commit` mode rows are written as the input is consumed. If a
-  malformed-CSV or encoding error is encountered partway through the file,
-  rows before the failure are already committed and this returns
-  `{:error, %Error{}}` — the commit is not atomic across a mid-file parse
-  failure. Imports are idempotent upserts, so re-running the corrected file
-  converges. For large or untrusted input prefer `stream_import/4`.
+  `:commit` mode is not atomic. Rows are written as the input is consumed,
+  so a parse or encoding error partway through leaves earlier rows
+  committed and still returns `{:error, %Error{}}`. Imports are idempotent
+  upserts, so re-running the corrected file converges. Prefer
+  `stream_import/4` for large or untrusted input.
   """
   @spec import_csv(module(), atom(), Parser.source(), keyword()) ::
           {:ok, RunReport.t()} | {:error, Error.t()}
@@ -121,18 +121,14 @@ defmodule AshCsvInterchange.Import.Orchestrator do
   @doc """
   Streams a CSV import as a lazy sequence of per-row outcomes.
 
-  Reads the header eagerly (fatal header/encoding errors return
-  `{:error, %Error{}}` synchronously), then returns a
-  `%AshCsvInterchange.Import.StreamReport{}` whose `outcomes` field is a
-  lazy stream of `%RowOutcome{}` — one per non-blank data row. In
-  `:commit` mode, database writes happen as the stream is consumed.
+  Reads the header eagerly, so fatal header and encoding errors return
+  `{:error, %Error{}}` at once. Returns a `%StreamReport{}` whose
+  `outcomes` field is a lazy stream of one `%RowOutcome{}` per non-blank
+  data row. In `:commit` mode, writes happen as the stream is consumed.
 
-  Accepts the same `source` shapes and options as `import_csv/4`, plus
-  `:retain_records?` (default `false`) controlling whether committed
-  outcomes carry the full Ash `record`, and `:batch_size` (default `100`)
-  controlling how many rows are dispatched per `Ash.bulk_create/4` call in
-  `:commit` mode. The returned stream yields outcomes one batch at a time
-  — it never buffers more than one batch's worth of rows.
+  Takes the same `source` shapes and options as `import_csv/4`. The
+  returned stream yields outcomes one batch at a time — it never buffers
+  more than one batch's worth of rows.
   """
   @spec stream_import(module(), atom(), Parser.source(), keyword()) ::
           {:ok, StreamReport.t()} | {:error, Error.t()}

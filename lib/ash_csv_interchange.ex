@@ -1,26 +1,26 @@
 defmodule AshCsvInterchange do
   @moduledoc """
-  An Ash extension for declaring CSV-importable resources. Resources that
-  use this extension expose:
+  An Ash extension for moving CSV data in and out of Ash resources.
+  Resources that use it expose:
 
-  * a `csv_imports do ... end` block, declaring one or more named CSV
-    types via `csv_import :id do ... end` entities
-  * per-row Ash `:create` actions that the extension dispatches to
-  * idempotent re-runs through Ash's upsert mechanism
+  * `csv_imports do ... end` — named import types, each dispatched to a
+    per-row Ash `:create` action and re-run idempotently through upserts
+  * `csv_exports do ... end` — named export types, each streaming a read
+    action's records out to CSV
 
   ## Setup
 
-  Tell the extension which OTP app owns your CSV resources, then register the
-  domains holding them under that app:
+  Name the OTP app that owns your CSV resources, then register the domains
+  holding them under that app:
 
       config :ash_csv_interchange, otp_app: :my_app
       config :my_app, AshCsvInterchange, domains: [MyApp.Domain]
 
-  `otp_app` is required: it names the application whose config the extension
-  reads its domain registry from. Without it, type discovery raises rather
-  than silently finding nothing.
+  `otp_app` is required. It names the app whose config holds the domain
+  registry. Without it, type discovery raises rather than silently finding
+  nothing.
 
-  Then add the extension to each resource:
+  Add the extension to each resource:
 
       defmodule MyApp.Contact do
         use Ash.Resource,
@@ -62,23 +62,21 @@ defmodule AshCsvInterchange do
   @type source :: binary() | {:path, Path.t()} | Enumerable.t()
 
   @doc """
-  Lists every CSV import type registered across configured domains.
+  Lists every CSV import type registered across the configured domains.
 
-  Reads the host app's `AshCsvInterchange, domains: [...]` (defaults to `[]`)
-  — the host app being `config :ash_csv_interchange, otp_app: ...` when set,
-  otherwise the app that owns this module — walks each domain via
-  `Ash.Domain.Info.resources/1`, and emits one entry per
-  declared `csv_import` entity on resources that use the extension.
+  Walks each domain in `config :my_app, AshCsvInterchange, domains: [...]`
+  with `Ash.Domain.Info.resources/1` and emits one entry per `csv_import`
+  entity. `:my_app` is the app named by
+  `config :ash_csv_interchange, otp_app: ...`, which is required.
 
-  Raises if two resources declare the same `:id` — type ids must be unique
-  across the configured registry.
+  Raises if two resources declare the same `:id`. Type ids must be unique
+  across the registry.
 
   Options:
 
-  * `:actor` — when provided, filters out types whose configured upsert
-    action the actor is not authorised to perform (via `Ash.can?/2`).
-    When absent, every registered type is returned — callers needing
-    role-gated discovery should pass an actor.
+  * `:actor` — drops types whose upsert action the actor cannot perform,
+    via `Ash.can?/2`. Without an actor, every registered type is returned,
+    so pass one when discovery must be role-gated.
   """
   @spec list_import_types(keyword()) :: [%{id: atom(), label: String.t(), resource: module()}]
   def list_import_types(opts \\ []) do
@@ -88,12 +86,12 @@ defmodule AshCsvInterchange do
   @doc """
   Lists every CSV export type registered across the configured domains.
 
-  Pass `:actor` to filter to types the actor is allowed to read; without
-  one, every registered type comes back.
+  Pass `:actor` to keep only the types that actor may read. Without one,
+  every registered type comes back.
 
-  Raises if two export entities share an `:id`. The import and export
-  namespaces are independent, so the same `:id` may appear in both
-  sections of one resource as a round-trip pairing signal.
+  Raises if two export entities share an `:id`. Import and export ids are
+  separate namespaces, so one resource may use the same `:id` in both
+  sections to mark a round-trip pair.
   """
   @spec list_export_types(keyword()) :: [%{id: atom(), label: String.t(), resource: module()}]
   def list_export_types(opts \\ []) do
@@ -241,25 +239,23 @@ defmodule AshCsvInterchange do
   end
 
   @doc """
-  Builds a lazy stream of CSV chunks for the named export type. The
-  first chunk is the header row, subsequent chunks are serialised
-  batches of records from the declared read action.
+  Builds a lazy stream of CSV chunks for the named export type. The first
+  chunk is the header row. Each later chunk is a serialised batch of
+  records from the declared read action.
 
   Options:
 
-    * `:actor` runs the stream as this actor; authorisation honours the
-      resource's policies on the read action.
-    * `:input` arguments passed to the declared read action, as a map.
-      Defaults to `%{}`. Required when the read action declares required
-      arguments — omitting it then raises the read action's
+    * `:actor` — runs the stream as this actor. The read action's policies
+      apply.
+    * `:input` — arguments for the read action, as a map. Defaults to
+      `%{}`. A read action with required arguments raises its own
       missing-argument error once the stream is consumed.
-    * `:batch_size` page size for the underlying read. Defaults to `500`.
+    * `:batch_size` — page size for the underlying read. Defaults to `500`.
 
-  Returns `{:error, %Error{}}` synchronously before any database work
-  when the id isn't registered or the actor can't perform the declared
-  read action. Errors raised once the stream is being consumed (a
-  calculation crash, a formatter exception) propagate through to the
-  consumer rather than being swallowed.
+  Returns `{:error, %Error{}}` before any database work when the id is not
+  registered, or when the actor cannot perform the read action. Errors
+  raised while the stream is consumed — a calculation crash, a formatter
+  exception — reach the consumer rather than being swallowed.
   """
   @spec stream_export(atom(), keyword()) :: {:ok, Enumerable.t()} | {:error, Error.t()}
   def stream_export(id, opts \\ []) when is_atom(id) do

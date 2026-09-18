@@ -1,16 +1,16 @@
 defmodule AshCsvInterchange.Import.Parser do
   @moduledoc """
-  RFC 4180 CSV parser with an eager binary path and a streaming path.
+  RFC 4180 CSV parser with an eager path and a streaming path.
 
   `parse/1` parses a whole binary into a list of rows. `parse_stream/2`
-  reads only the header line eagerly — so fatal header/encoding errors
-  surface synchronously — and returns the remaining data rows as a lazy
-  stream backed by `NimbleCSV.RFC4180.parse_stream/2`.
+  reads only the header line eagerly, so fatal header and encoding errors
+  surface at once, and returns the data rows as a lazy stream over
+  `NimbleCSV.RFC4180.parse_stream/2`.
 
-  Streaming sources may be a binary, a `{:path, path}` tuple (the file is
-  opened by the parser), or any **re-enumerable** `Enumerable` of binary
-  chunks. One-shot sources are not supported: the header is read by
-  enumerating the source once, and the body re-enumerates it.
+  A streaming source is a binary, a `{:path, path}` tuple (the parser opens
+  the file), or any **re-enumerable** `Enumerable` of binary chunks.
+  One-shot sources do not work: reading the header enumerates the source
+  once, and the body enumerates it again.
   """
 
   alias AshCsvInterchange.Error
@@ -49,16 +49,15 @@ defmodule AshCsvInterchange.Import.Parser do
   end
 
   @doc """
-  Reads the header line eagerly and returns the remaining data rows as a
-  lazy stream.
+  Reads the header line eagerly and returns the data rows as a lazy stream.
 
-  Returns `{:ok, {header_row, body}}` where `header_row` is a list of
-  column strings and `body` is a lazy `Enumerable` of data rows (each a
-  list of strings), header excluded. Returns `{:error, %Error{}}` for an
+  Returns `{:ok, {header_row, body}}`. `header_row` is a list of column
+  strings. `body` is a lazy `Enumerable` of data rows, each a list of
+  strings, with the header excluded. Returns `{:error, %Error{}}` for an
   empty file or a malformed header line.
 
-  Invalid UTF-8 in a *data* row is not detected here; it raises a
-  StreamError (this module's nested exception) when the body stream is
+  Invalid UTF-8 in a *data* row is not detected here. It raises
+  `StreamError`, this module's nested exception, when the body stream is
   consumed.
   """
   @spec parse_stream(source(), keyword()) ::

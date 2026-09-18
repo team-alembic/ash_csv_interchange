@@ -9,12 +9,10 @@ defmodule AshCsvInterchange.Transformers.ValidateImportAction do
      action or an accepted attribute.
   3. No two header columns collide after whitespace trim and ASCII
      case-fold.
-  4. Every key on the action's `upsert_identity` is known to the
-     upsert action — i.e. declared as an argument or in the action's
-     `accept` list. Whether the value arrives from a CSV header or is
-     populated by a change is the action author's responsibility; this
-     check just catches the common typo case where an identity key has
-     nowhere to land.
+  4. Every `upsert_identity` key is an argument or an accepted attribute
+     of the upsert action. This catches the typo case where an identity
+     key has nowhere to land. Where the value comes from is the action
+     author's concern.
   5. If `import_source` is set, its attribute exists on the resource.
 
   Failures raise `Spark.Error.DslError` pointing at the offending
