@@ -22,6 +22,12 @@ config :git_ops,
 # moduledoc). Dependency config files aren't loaded by consumers, so this is
 # scoped to the library's own dev/test runs.
 if config_env() == :test do
+  # Ash 3.33 requires this to be set wherever resources are compiled. Only the
+  # test fixtures declare resources, so it is scoped here. `:codepoints` is
+  # Ash's recommended value: it matches how SQL data layers count length, so
+  # `max_length` actually bounds the stored value.
+  config :ash, default_string_length_count: :codepoints
+
   config :ash_csv_interchange, otp_app: :ash_csv_interchange
 
   # The fixture resources are Ash-backed, and Ash logs every data-layer write
