@@ -86,6 +86,11 @@ defmodule AshCsvInterchange.MixProject do
       # Formatter plugin — rewrites code based on .credo.exs rules.
       {:quokka, "~> 2.12", only: [:dev, :test], runtime: false},
 
+      # Required by `mix spark.formatter`, which regenerates the exported
+      # `spark_locals_without_parens` list in .formatter.exs. Declared
+      # explicitly so the check runs under MIX_ENV=test in CI.
+      {:sourceror, "~> 1.0", only: [:dev, :test], runtime: false},
+
       # Ash-aware Credo checks (opt-in for Ash packages). Also enable the
       # plugin in .credo.exs and switch the `lint` alias to compile before
       # credo — the compiled-introspection checks need it.
@@ -107,6 +112,7 @@ defmodule AshCsvInterchange.MixProject do
       ci: [
         "deps.unlock --check-unused",
         "format --check-formatted",
+        "spark.formatter --check --extensions AshCsvInterchange",
         "credo --strict",
         "doctor --full --raise",
         "sobelow --config",
