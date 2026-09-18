@@ -81,9 +81,8 @@ defmodule AshCsvInterchange.Import.Parser do
   end
 
   defp to_chunks(binary) when is_binary(binary), do: [binary]
-  # Opening a caller-supplied path is the whole point of the {:path, _} source;
-  # traversal safety is the caller's responsibility, so sobelow's File.stream!
-  # finding is a false positive here.
+  # The {:path, _} source exists to open a caller-supplied path. The caller
+  # owns traversal safety, so this sobelow finding is a false positive.
   # sobelow_skip ["Traversal.FileModule"]
   defp to_chunks({:path, path}), do: File.stream!(path)
   defp to_chunks(enum), do: enum
@@ -131,11 +130,10 @@ defmodule AshCsvInterchange.Import.Parser do
     end
   end
 
-  # Real-world exports (e.g. WellSky) sometimes emit headers that contain
-  # commas without RFC 4180 quoting, which would split the column into
-  # fragments at parse time. When a declared header contains a comma,
-  # locate it (case-insensitively) in the raw header line and wrap it in
-  # double quotes so NimbleCSV treats it as a single field.
+  # Some exports emit headers with unquoted commas, which the parser splits
+  # into fragments. Find each declared comma-bearing header in the raw line,
+  # ignoring case, and wrap it in double quotes. NimbleCSV then reads it as
+  # one field.
   defp comma_headers(headers_config) do
     (headers_config[:required] ++ headers_config[:optional])
     |> Enum.map(&Headers.column_name/1)

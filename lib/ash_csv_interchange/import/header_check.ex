@@ -81,10 +81,9 @@ defmodule AshCsvInterchange.Import.HeaderCheck do
 
   defp normalise_all(headers), do: Enum.map(headers, &Headers.normalise/1)
 
-  # Heuristic for the duplicate-headers case: when an unquoted CSV header
-  # gets split on its embedded commas, the resulting fragments are
-  # substrings of a declared header that contains commas. If we see such
-  # a match, surface a hint pointing at the offending declared header.
+  # An unquoted header splits on its own commas. Each fragment is then a
+  # substring of a declared header that contains commas. Match that shape to
+  # name the offending column.
   defp comma_split_hint(parsed_fragments, required_declared) do
     required_declared
     |> Enum.find(fn declared ->
@@ -100,10 +99,9 @@ defmodule AshCsvInterchange.Import.HeaderCheck do
     end
   end
 
-  # Heuristic for the missing-required-headers case: if any missing
-  # declared header itself contains a comma, the operator likely tried
-  # to write that header into the source without quoting it (so the
-  # parser split it into pieces and the original column is now absent).
+  # A missing declared header that contains a comma was probably written
+  # unquoted. The parser split it into fragments, so the original column is
+  # absent.
   defp missing_comma_hint(missing_normalised, required_declared) do
     missing_set = MapSet.new(missing_normalised)
 

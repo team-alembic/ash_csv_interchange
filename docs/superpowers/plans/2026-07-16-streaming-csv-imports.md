@@ -265,7 +265,7 @@ defmodule AshCsvInterchange.Import.Parser do
     end
   end
 
-  # Real-world exports (e.g. WellSky) sometimes emit headers that contain
+  # Some real-world exports emit headers that contain
   # commas without RFC 4180 quoting, which would split the column into
   # fragments at parse time. When a declared header contains a comma,
   # locate it (case-insensitively) in the raw header line and wrap it in

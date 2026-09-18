@@ -93,11 +93,10 @@ defmodule AshCsvInterchange.Import.StreamImportTest do
 
     test "back-pressure: consuming N outcomes pulls only ~N rows from the source" do
       {:ok, counter} = Agent.start_link(fn -> 0 end)
-      # `Agent.start_link/1` links the counter to this test process. ExUnit
-      # exits the test process with reason `:shutdown` right after the test
-      # body returns, which — since the link is non-normal — kills the
-      # (non-trapping) Agent before `on_exit` callbacks run. Guard against
-      # that already-dead state instead of crashing `on_exit` on a noproc.
+      # `Agent.start_link/1` links the counter to the test process. ExUnit
+      # exits that process with `:shutdown`, which kills the agent before
+      # `on_exit` runs. Guard against the dead agent so `on_exit` does not
+      # fail on a noproc.
       on_exit(fn -> if Process.alive?(counter), do: Agent.stop(counter) end)
 
       raw =

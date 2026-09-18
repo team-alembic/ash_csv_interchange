@@ -174,11 +174,10 @@ defmodule AshCsvInterchange.Transformers.ValidateImportAction do
     end
   end
 
-  # Walks the action's declared changes for `manage_relationship` invocations
-  # and returns the source-attribute (FK) of each managed relationship. These
-  # FKs are populated by Ash at action time, so an upsert identity that
-  # references one is satisfied even when the FK isn't a CSV header or an
-  # explicitly accepted attribute.
+  # Returns the source attribute (FK) of each `manage_relationship` change on
+  # the action. Ash sets these FKs at action time. An upsert identity that
+  # references one is therefore satisfied, with no header or accepted
+  # attribute needed.
   defp managed_relationship_fks(dsl_state, changes) do
     for %{change: {Ash.Resource.Change.ManageRelationship, opts}} <- changes,
         relationship = Keyword.get(opts, :relationship),

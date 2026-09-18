@@ -229,9 +229,9 @@ defmodule AshCsvInterchange.Transformers.ValidateImportActionTest do
                    end
 
                    identities do
-                     # Ets can't natively check identities; without `pre_check_with`
-                     # Ash's verifier warns at compile time and the suite is no
-                     # longer silent.
+                     # Ets cannot check identities natively. Without
+                     # `pre_check_with`, Ash's verifier warns at compile time
+                     # and the suite is no longer silent.
                      identity :external_id, [:external_id],
                        pre_check_with: AshCsvInterchange.TestDomain
                    end

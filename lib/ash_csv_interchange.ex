@@ -295,12 +295,10 @@ defmodule AshCsvInterchange do
     end
   end
 
-  # The library can't assume a particular host app name: it resolves the host
-  # OTP app from its own config (`config :ash_csv_interchange, otp_app: ...`)
-  # and reads the domain registry from that app's config. The lookup is
-  # mandatory — an unconfigured `otp_app` raises rather than silently
-  # registering no types, which would otherwise surface much later as a
-  # baffling "no CSV types found".
+  # A library cannot know the host app name. Resolve it from
+  # `config :ash_csv_interchange, otp_app: ...`, then read that app's domain
+  # registry. An unset `otp_app` raises. Registering no types instead would
+  # fail later, far from the cause.
   defp configured_domains do
     host_app()
     |> Application.get_env(__MODULE__, [])

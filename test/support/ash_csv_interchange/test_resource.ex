@@ -60,9 +60,9 @@ defmodule AshCsvInterchange.TestResource do
   end
 
   identities do
-    # `pre_check_with` is required because this fixture uses Ash.DataLayer.Ets,
-    # which can't natively check uniqueness during upsert. Postgres-backed
-    # resources don't need this option — the DB enforces uniqueness directly.
+    # Ets cannot check uniqueness during upsert, so this fixture needs
+    # `pre_check_with`. Postgres-backed resources do not: the database
+    # enforces uniqueness.
     identity :external_id, [:external_id], pre_check_with: AshCsvInterchange.TestDomain
   end
 end

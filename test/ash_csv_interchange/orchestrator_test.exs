@@ -59,11 +59,9 @@ defmodule AshCsvInterchange.Import.OrchestratorTest do
     end
 
     test "auto-quotes declared comma-containing headers when source is unquoted" do
-      # Source CSV has the comma-laden header unquoted — exactly the shape a
-      # raw WellSky export produces. Without auto-quoting, NimbleCSV would
-      # split the formula text on its embedded commas and HeaderCheck would
-      # report :duplicate_headers. With auto-quoting, the orchestrator
-      # re-wraps the header in double quotes before parsing.
+      # The source leaves the comma-bearing header unquoted, as some exports
+      # do. Without auto-quoting, NimbleCSV splits it and HeaderCheck reports
+      # :duplicate_headers.
       unquoted_csv = """
       external_id,name,Substr(b,5,2)!!'/'!!substr(b,7,2)!!'/'!!substr(b,1,4)
       EXT1,Alice,1990-04-12
