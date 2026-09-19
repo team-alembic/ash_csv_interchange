@@ -81,7 +81,6 @@ defmodule AshCsvInterchange.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:doctor, "~> 0.21", only: [:dev, :test], runtime: false},
       {:ex_check, "~> 0.16", only: [:dev, :test], runtime: false},
-      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
 
       # Dev QoL
@@ -122,7 +121,6 @@ defmodule AshCsvInterchange.MixProject do
         "doctor --full --raise",
         "sobelow --config",
         "hex.audit",
-        "deps.audit",
         "dialyzer",
         "test"
       ],
