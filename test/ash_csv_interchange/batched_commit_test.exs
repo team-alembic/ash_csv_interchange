@@ -1,6 +1,8 @@
 defmodule AshCsvInterchange.Import.BatchedCommitTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog, only: [with_log: 1]
+
   alias AshCsvInterchange.{CrashingResource, DbErrorResource, TestDomain, TestResource}
   alias AshCsvInterchange.Import.Orchestrator
 
@@ -121,11 +123,18 @@ defmodule AshCsvInterchange.Import.BatchedCommitTest do
       ok2
       """
 
-      assert {:ok, report} =
-               Orchestrator.import_csv(CrashingResource, :crashing, csv,
-                 mode: :commit,
-                 batch_size: 100
-               )
+      {result, log} =
+        with_log(fn ->
+          Orchestrator.import_csv(CrashingResource, :crashing, csv,
+            mode: :commit,
+            batch_size: 100
+          )
+        end)
+
+      assert {:ok, report} = result
+
+      # The warning is a deliberate signal. Assert it, do not hide it.
+      assert log =~ "Ash.bulk_create raised"
 
       [ok1, crashed, ok2] = report.outcomes
       assert ok1.status == :ok
