@@ -20,7 +20,7 @@ small, documented, and backwards-compatible between minor releases.
 | Test        | ExUnit (`mix test`)                     |
 | Docs        | ExDoc (`mix docs`)                      |
 | Style       | `mix format` + Quokka (enforced in CI)  |
-| Security    | Sobelow, `mix hex.audit`, `mix deps.audit` |
+| Security    | Sobelow, `mix hex.audit`                |
 | Coverage    | Doctor doc-coverage (`mix doctor`)      |
 | Release     | `git_ops` (conventional commits → tag + CHANGELOG) |
 | Agent rules | `usage_rules` (skills mode)             |
