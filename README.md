@@ -78,7 +78,7 @@ See the [online documentation](https://hexdocs.pm/ash_csv_interchange) for more.
 
 ## Development
 
-Requires Elixir / OTP as pinned in [`.tool-versions`](./.tool-versions).
+Requires Elixir / OTP as pinned in [`.tool-versions`](https://github.com/team-alembic/ash_csv_interchange/blob/main/.tool-versions).
 
 ```bash
 mix deps.get
@@ -106,7 +106,7 @@ publishes to Hex on your behalf.
 
 ## License
 
-Apache 2.0. See [LICENSE](./LICENSE).
+Apache 2.0. See [LICENSE](https://github.com/team-alembic/ash_csv_interchange/blob/main/LICENSE).
 
 ---
 
