@@ -106,8 +106,9 @@ defmodule AshCsvInterchange.MixProject do
       # Syncs usage-rules.md from deps into AGENTS.md or agent skills.
       {:usage_rules, "~> 1.1", only: [:dev], runtime: false},
 
-      # Needed by mix igniter.install and mix usage_rules.sync.
-      {:igniter, "~> 0.6", only: [:dev], runtime: false}
+      # Needed by mix igniter.install, mix usage_rules.sync and
+      # mix spark.cheat_sheets, whose --check runs under MIX_ENV=test in CI.
+      {:igniter, "~> 0.6", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -117,6 +118,7 @@ defmodule AshCsvInterchange.MixProject do
         "deps.unlock --check-unused",
         "format --check-formatted",
         "spark.formatter --check --extensions AshCsvInterchange",
+        "spark.cheat_sheets --check",
         "credo --strict",
         "doctor --full --raise",
         "sobelow --config",
@@ -128,7 +130,10 @@ defmodule AshCsvInterchange.MixProject do
       # If you enable ash_credo, use `mix lint` instead of `mix credo` — the
       # compiled-introspection checks need modules to be compiled first.
       lint: ["compile", "credo --strict"],
-      sobelow: ["sobelow --config"]
+      sobelow: ["sobelow --config"],
+      # Regenerates documentation/dsls/ from the DSL. Run after changing
+      # lib/ash_csv_interchange/dsl.ex; CI fails if the file is stale.
+      "spark.cheat_sheets": ["spark.cheat_sheets --extensions AshCsvInterchange"]
     ]
   end
 
@@ -139,7 +144,7 @@ defmodule AshCsvInterchange.MixProject do
       source_url_pattern: "#{@source_url}/blob/main/%{path}#L%{line}",
       extra_section: "GUIDES",
       extras: extras(),
-      groups_for_extras: [Guides: ~r"guides/"],
+      groups_for_extras: [Guides: ~r"guides/", "DSL reference": ~r"documentation/dsls/"],
       before_closing_head_tag: fn
         :html -> ~s|<link rel="icon" href="data:,">|
         _ -> ""
@@ -148,8 +153,16 @@ defmodule AshCsvInterchange.MixProject do
   end
 
   defp extras do
-    ["README.md", "CHANGELOG.md", "usage-rules.md"] ++
-      Path.wildcard("guides/**/*.{md,cheatmd,livemd}")
+    [
+      "README.md",
+      "guides/getting-started.md",
+      "guides/defining-imports.md",
+      "guides/running-imports.md",
+      "guides/exports.md",
+      "documentation/dsls/DSL-AshCsvInterchange.md",
+      "usage-rules.md",
+      "CHANGELOG.md"
+    ]
   end
 
   # `mix usage_rules.sync` materialises this config into committed

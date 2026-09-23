@@ -21,6 +21,8 @@ and per-row error reporting.
   resource. Type ids must be unique across all configured domains.
 - **Registry**: the extension discovers types by walking the resources of the
   domains listed under `config :my_app, AshCsvInterchange, domains: [...]`.
+  `config :ash_csv_interchange, otp_app: :my_app` is also required: it names
+  the app whose config holds that list. Without it, the first call raises.
 - **Idempotent import**: imports go through the resource's upsert action, so
   re-running the same file is safe.
 
@@ -43,6 +45,14 @@ end
 AshCsvInterchange.import_csv(:contacts, csv_binary, mode: :commit)
 {:ok, csv} = AshCsvInterchange.export_csv(:contacts)
 ```
+
+Imports default to `mode: :dry_run`, which validates every row and writes
+nothing. Pass `mode: :commit` to write.
+
+An export's read action must support keyset pagination
+(`pagination keyset?: true, required?: false`), because exports stream in
+batches. Any calculation or aggregate used as a column must be loaded by
+that read action (`prepare build(load: [...])`).
 
 If the export's read action takes arguments, pass them with `:input` (a map,
 default `%{}`). Read actions with required arguments raise their

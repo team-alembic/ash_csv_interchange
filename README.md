@@ -31,50 +31,75 @@ end
 
 ## Usage
 
+Configure the app that owns your CSV resources and the domains to search:
+
+```elixir
+config :ash_csv_interchange, otp_app: :my_app
+config :my_app, AshCsvInterchange, domains: [MyApp.Crm]
+```
+
 Add the extension to a resource and declare its CSV types:
 
 ```elixir
-defmodule MyApp.Contact do
+defmodule MyApp.Crm.Contact do
   use Ash.Resource,
+    domain: MyApp.Crm,
     extensions: [AshCsvInterchange]
 
   csv_imports do
     csv_import :contacts do
-      label "Contacts Export"
-      headers required: ["external_id", "first_name"], optional: []
+      label "Contacts"
+      headers required: ["external_id", "first_name"], optional: ["last_name"]
       upsert_action :import_from_csv
     end
   end
 
-  # ... actions, attributes, identities ...
+  csv_exports do
+    csv_export :contacts do
+      label "Contacts"
+      read_action :for_csv_export
+      columns [
+        {"external_id", :external_id},
+        {"first_name", :first_name},
+        {"last_name", :last_name}
+      ]
+    end
+  end
+
+  # ... an upsert action, a keyset-paginated read action, attributes and
+  # an identity. See the getting started guide for the full resource.
 end
 ```
 
-Register the domains that hold your CSV resources in config:
+Then import and export:
 
 ```elixir
-config :my_app, AshCsvInterchange, domains: [MyApp.Domain]
-```
+# Check a file without writing anything, then commit it.
+{:ok, report} = AshCsvInterchange.import_csv(:contacts, csv)
+{:ok, report} = AshCsvInterchange.import_csv(:contacts, csv, mode: :commit)
 
-Then import and export CSV data through the public API:
-
-```elixir
-# Import a CSV binary against a registered type.
-AshCsvInterchange.import_csv(:contacts, csv_binary, mode: :commit)
-
-# Export a registered type as a single binary, or stream it.
-{:ok, csv} = AshCsvInterchange.export_csv(:contacts)
-{:ok, stream} = AshCsvInterchange.stream_export(:contacts, batch_size: 500)
-
-# Pass arguments to the export's read action with :input.
-{:ok, csv} = AshCsvInterchange.export_csv(:contacts, input: %{last_name: "Lovelace"})
-
-# Stream a large import lazily; rows commit as the stream is consumed.
+# Stream a large file; rows are written as the stream is consumed.
 {:ok, %{outcomes: outcomes}} =
   AshCsvInterchange.stream_import(:contacts, {:path, "/tmp/contacts.csv"}, mode: :commit)
+
+# Export as one binary, or as a stream of chunks.
+{:ok, csv} = AshCsvInterchange.export_csv(:contacts)
+{:ok, stream} = AshCsvInterchange.stream_export(:contacts, batch_size: 500)
 ```
 
-See the [online documentation](https://hexdocs.pm/ash_csv_interchange) for more.
+## Guides
+
+- [Getting started](guides/getting-started.md): a complete resource, from
+  first dry run to first export
+- [Defining imports](guides/defining-imports.md): headers, the upsert
+  action, reshaping values, stamping imported records
+- [Running imports](guides/running-imports.md): reports, errors, large
+  files, batching and authorisation
+- [Exports](guides/exports.md): columns, formatters, calculations,
+  streaming and round trips
+- [DSL reference](documentation/dsls/DSL-AshCsvInterchange.md)
+
+The same guides are in the [online documentation](https://hexdocs.pm/ash_csv_interchange).
 
 ## Development
 

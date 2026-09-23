@@ -61,7 +61,13 @@ defmodule AshCsvInterchange.Dsl do
                 "its values never reach the upsert action."
           ]
         ],
-        doc: "Column-to-input mapping for this CSV type."
+        doc:
+          "Column-to-input mapping for this CSV type. Keys: `required:` (columns " <>
+            "the file must contain), `optional:` (columns it may contain) and " <>
+            "`ignored:` (columns to accept and discard). A `required`/`optional` " <>
+            "entry is a column name, passed to the action under the same key, or " <>
+            "a `{column, input_key}` tuple. Columns match after whitespace trim " <>
+            "and ASCII case-fold."
       ],
       upsert_action: [
         type: :atom,
