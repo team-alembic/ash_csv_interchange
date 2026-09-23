@@ -393,3 +393,63 @@ defmodule AshCsvInterchange.DbErrorResource do
     identity :name, [:name], pre_check_with: AshCsvInterchange.DbErrorDomain
   end
 end
+
+defmodule AshCsvInterchange.HookRaisingDomain do
+  @moduledoc false
+  use Ash.Domain, validate_config_inclusion?: false
+
+  resources do
+    resource AshCsvInterchange.HookRaisingResource
+  end
+end
+
+defmodule AshCsvInterchange.HookRaisingResource do
+  @moduledoc """
+  Test action whose `before_action` hook raises on `name=boom`. Hooks run
+  inside the write, not while the changeset is built, so this is how a
+  test makes `Ash.bulk_create/4` itself raise.
+  """
+
+  use Ash.Resource,
+    domain: AshCsvInterchange.HookRaisingDomain,
+    data_layer: Ash.DataLayer.Ets,
+    extensions: [AshCsvInterchange]
+
+  ets do
+    private?(true)
+  end
+
+  csv_imports do
+    csv_import :hook_raising do
+      label("Hook raising")
+      headers(required: ["name"], optional: [])
+      upsert_action(:create_action)
+    end
+  end
+
+  actions do
+    defaults [:read]
+
+    create :create_action do
+      description "Test action whose before_action hook raises on name=boom"
+      accept [:name]
+      upsert? true
+      upsert_identity :name
+
+      change before_action(fn changeset, _context ->
+               if Ash.Changeset.get_attribute(changeset, :name) == "boom", do: raise("kaboom")
+               changeset
+             end)
+    end
+  end
+
+  attributes do
+    uuid_v7_primary_key :id
+    attribute :name, :string, allow_nil?: false, public?: true
+    timestamps()
+  end
+
+  identities do
+    identity :name, [:name], pre_check_with: AshCsvInterchange.HookRaisingDomain
+  end
+end

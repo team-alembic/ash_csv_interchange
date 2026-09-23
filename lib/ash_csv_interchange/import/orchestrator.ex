@@ -305,67 +305,45 @@ defmodule AshCsvInterchange.Import.Orchestrator do
 
     rows = for {:row, line_no, input} <- prepared, do: {line_no, input}
     identity_keys = upsert_identity_keys(resource, type.upsert_action)
-    {bulk_rows, fallback_line_nos} = partition_by_identity(rows, identity_keys)
-    successes = bulk_commit(bulk_rows, type, resource, ash_opts, identity_keys)
 
-    {outcomes, _bulk_index} =
-      Enum.map_reduce(prepared, 0, fn
-        {:blank, line_no}, bulk_index ->
-          {{:blank, line_no}, bulk_index}
+    successes =
+      bulk_commit(
+        rows_with_unique_identity(rows, identity_keys),
+        type,
+        resource,
+        ash_opts,
+        identity_keys
+      )
 
-        {:row, line_no, input}, bulk_index ->
-          if MapSet.member?(fallback_line_nos, line_no) do
-            outcome =
+    Enum.map(prepared, fn
+      {:blank, line_no} ->
+        {:blank, line_no}
+
+      {:row, line_no, input} ->
+        outcome =
+          case Map.fetch(successes, line_no) do
+            {:ok, record} ->
+              success_outcome(line_no, input, record, retain_records?)
+
+            :error ->
               process_input(input, line_no, type, resource, :commit, ash_opts, retain_records?)
-
-            {{:outcome, outcome}, bulk_index}
-          else
-            outcome =
-              case Map.fetch(successes, bulk_index) do
-                {:ok, record} ->
-                  success_outcome(line_no, input, record, retain_records?)
-
-                :error ->
-                  process_input(
-                    input,
-                    line_no,
-                    type,
-                    resource,
-                    :commit,
-                    ash_opts,
-                    retain_records?
-                  )
-              end
-
-            {{:outcome, outcome}, bulk_index + 1}
           end
-      end)
 
-    outcomes
+        {:outcome, outcome}
+    end)
   end
 
-  defp partition_by_identity(rows, identity_keys) do
-    tagged =
-      Enum.map(rows, fn {line_no, input} ->
-        {line_no, input, identity_group_key(input, identity_keys)}
+  # Rows sharing an identity within the batch are left out, so they take
+  # the per-row path in file order (see `process_commit_batch/7`).
+  defp rows_with_unique_identity(rows, identity_keys) do
+    keyed =
+      Enum.map(rows, fn {_line_no, input} = row ->
+        {identity_group_key(input, identity_keys), row}
       end)
 
-    duplicate_keys =
-      tagged
-      |> Enum.group_by(fn {_line_no, _input, key} -> key end)
-      |> Enum.filter(fn {key, members} -> key != :unknown and length(members) > 1 end)
-      |> MapSet.new(fn {key, _members} -> key end)
+    frequencies = keyed |> Enum.map(&elem(&1, 0)) |> Enum.frequencies()
 
-    {bulk_rows, fallback_line_nos} =
-      Enum.reduce(tagged, {[], MapSet.new()}, fn {line_no, input, key}, {bulk_rows, fallback_line_nos} ->
-        if MapSet.member?(duplicate_keys, key) do
-          {bulk_rows, MapSet.put(fallback_line_nos, line_no)}
-        else
-          {[{line_no, input} | bulk_rows], fallback_line_nos}
-        end
-      end)
-
-    {Enum.reverse(bulk_rows), fallback_line_nos}
+    for {key, row} <- keyed, key == :unknown or frequencies[key] == 1, do: row
   end
 
   # `identity_keys` are always argument names or accepted-attribute names
@@ -387,16 +365,36 @@ defmodule AshCsvInterchange.Import.Orchestrator do
 
   defp bulk_commit([], _type, _resource, _ash_opts, _identity_keys), do: %{}
 
+  # Returns `%{line_no => record}` for every row a bulk dispatch wrote.
+  # Rows missing from the map take the per-row path.
+  #
+  # A bulk upsert writes the same `upsert_fields` for every row in the
+  # dispatch, but a per-row upsert writes only the attributes its own
+  # changeset sets. Rows are grouped by that set and each group is
+  # dispatched with it, so an optional column the file leaves out, or an
+  # attribute no import writes, keeps its stored value exactly as it would
+  # with `batch_size: 1`.
   defp bulk_commit(rows, type, resource, ash_opts, identity_keys) do
-    inputs = Enum.map(rows, fn {_line_no, input} -> input end)
+    rows
+    |> Enum.group_by(&upsert_fields_for(&1, type, resource, ash_opts, identity_keys))
+    |> Enum.reject(fn {upsert_fields, _rows} -> upsert_fields == :per_row end)
+    |> Enum.reduce(%{}, fn {upsert_fields, group}, successes ->
+      Map.merge(successes, bulk_commit_group(group, upsert_fields, type, resource, ash_opts))
+    end)
+  end
+
+  defp bulk_commit_group(rows, upsert_fields, type, resource, ash_opts) do
+    {line_nos, inputs} = Enum.unzip(rows)
+    line_nos = List.to_tuple(line_nos)
 
     inputs
     |> Ash.bulk_create(
       resource,
       type.upsert_action,
-      bulk_create_opts(ash_opts, type, resource, identity_keys)
+      bulk_create_opts(ash_opts, type, upsert_fields)
     )
     |> successes_by_index()
+    |> Map.new(fn {index, record} -> {elem(line_nos, index), record} end)
   rescue
     # every row falls back to the per-row path, so outcomes stay correct —
     # but a raise here on each batch silently forfeits the batching win,
@@ -410,10 +408,13 @@ defmodule AshCsvInterchange.Import.Orchestrator do
       %{}
   end
 
-  defp bulk_create_opts(ash_opts, type, resource, identity_keys) do
-    Keyword.merge(ash_opts,
+  defp bulk_create_opts(ash_opts, type, upsert_fields) do
+    upsert_opts = if upsert_fields == :declared, do: [], else: [upsert_fields: upsert_fields]
+
+    ash_opts
+    |> Keyword.merge(upsert_opts)
+    |> Keyword.merge(
       upsert?: true,
-      upsert_fields: default_upsert_fields(resource, identity_keys),
       stop_on_error?: false,
       return_records?: true,
       return_errors?: false,
@@ -421,25 +422,45 @@ defmodule AshCsvInterchange.Import.Orchestrator do
     )
   end
 
-  # Ash.bulk_create/4 requires upsert_fields to be given explicitly (unlike
-  # single-row Ash.create/1, which infers it from the changeset). A plain
-  # list of every attribute but the identity, the primary key, and
-  # `update_default` attributes (e.g. `updated_at`) mirrors what a
-  # per-row upsert changes on conflict.
+  # The fields a per-row upsert of this row would write, which is the
+  # group key for `bulk_commit/5`. An action that declares `upsert_fields`
+  # writes those for every row, so `Ash.bulk_create/4` reads them off the
+  # action (`:declared`). A row whose changeset is invalid or raises would
+  # fail in the batch anyway, so it goes straight to the per-row path
+  # (`:per_row`) for its outcome.
   #
-  # `update_default` attributes are deliberately left out: naming one
-  # here would make `Ash.Changeset.set_on_upsert/2` read its value
-  # straight off the create changeset (the same instant as
-  # `inserted_at`) instead of recomputing it as an update default —
-  # silently losing the create/update distinction `upsert_kind/1` relies
-  # on.
-  defp default_upsert_fields(resource, identity_keys) do
-    exclude = identity_keys ++ Ash.Resource.Info.primary_key(resource)
+  # Otherwise this mirrors `Ash.Changeset.set_on_upsert/2`: the attributes
+  # the changeset sets explicitly, not by default, less the identity and
+  # primary key. `update_default` attributes (e.g. `updated_at`) are left
+  # out: naming one would make the bulk upsert copy its create-time value,
+  # the same instant as `inserted_at`, instead of recomputing it, and
+  # `upsert_kind/1` would report every update as a create.
+  defp upsert_fields_for({_line_no, input}, type, resource, ash_opts, identity_keys) do
+    changeset =
+      resource
+      |> Ash.Changeset.for_create(type.upsert_action, input, ash_opts)
+      |> apply_import_source(type.import_source)
 
-    resource
-    |> Ash.Resource.Info.attributes()
-    |> Enum.reject(&(&1.name in exclude or &1.update_default != nil))
-    |> Enum.map(& &1.name)
+    cond do
+      not changeset.valid? -> :per_row
+      changeset.action.upsert_fields -> :declared
+      true -> explicitly_changed_attributes(changeset, resource, identity_keys)
+    end
+  rescue
+    _exception -> :per_row
+  end
+
+  defp explicitly_changed_attributes(changeset, resource, identity_keys) do
+    update_defaults =
+      for %{name: name, update_default: default} <- Ash.Resource.Info.attributes(resource),
+          default != nil,
+          do: name
+
+    exclude = identity_keys ++ Ash.Resource.Info.primary_key(resource) ++ update_defaults
+
+    (Map.keys(changeset.attributes) -- Map.get(changeset, :defaults, []))
+    |> Enum.reject(&(&1 in exclude))
+    |> Enum.sort()
   end
 
   defp upsert_identity_keys(resource, upsert_action) do

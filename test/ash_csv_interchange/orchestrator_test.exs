@@ -1,8 +1,6 @@
 defmodule AshCsvInterchange.Import.OrchestratorTest do
   use ExUnit.Case, async: false
 
-  import ExUnit.CaptureLog, only: [with_log: 1]
-
   alias AshCsvInterchange.{
     ActorAwareResource,
     CrashingResource,
@@ -171,13 +169,8 @@ defmodule AshCsvInterchange.Import.OrchestratorTest do
       still_ok
       """
 
-      {result, log} =
-        with_log(fn ->
-          Orchestrator.import_csv(CrashingResource, :crashing, csv, mode: :commit)
-        end)
-
-      assert {:ok, %RunReport{outcomes: outcomes}} = result
-      assert log =~ "Ash.bulk_create raised"
+      assert {:ok, %RunReport{outcomes: outcomes}} =
+               Orchestrator.import_csv(CrashingResource, :crashing, csv, mode: :commit)
 
       [ok1, crashed, ok2] = outcomes
       assert ok1.status == :ok

@@ -3,7 +3,15 @@ defmodule AshCsvInterchange.Import.BatchedCommitTest do
 
   import ExUnit.CaptureLog, only: [with_log: 1]
 
-  alias AshCsvInterchange.{CrashingResource, DbErrorResource, TestDomain, TestResource}
+  alias AshCsvInterchange.{
+    CrashingResource,
+    DbErrorResource,
+    HookRaisingResource,
+    PartialUpsertResource,
+    TestDomain,
+    TestResource
+  }
+
   alias AshCsvInterchange.Import.Orchestrator
 
   # Runs `fun` inside a fresh process so the Ets-backed resources under test
@@ -63,6 +71,71 @@ defmodule AshCsvInterchange.Import.BatchedCommitTest do
     end
   end
 
+  describe "upserts change only what the row sets" do
+    # Seeds `seeds`, imports `csv` through the `type_id` import at
+    # `batch_size`, and returns the stored records keyed by external_id.
+    defp import_over_seeds(seeds, type_id, csv, batch_size) do
+      isolated(fn ->
+        Enum.each(seeds, &Ash.create!(PartialUpsertResource, &1))
+
+        {:ok, %{counts: %{failed: 0}}} =
+          Orchestrator.import_csv(PartialUpsertResource, type_id, csv,
+            mode: :commit,
+            batch_size: batch_size
+          )
+
+        PartialUpsertResource |> Ash.read!() |> Map.new(&{&1.external_id, &1})
+      end)
+    end
+
+    test "an optional column missing from the file keeps its stored value" do
+      seeds = [%{external_id: "E1", name: "Alice", nickname: "Al"}]
+      csv = "external_id,name\nE1,Alice Updated\n"
+
+      for batch_size <- [100, 1] do
+        %{"E1" => e1} = import_over_seeds(seeds, :partial_upsert, csv, batch_size)
+        assert {batch_size, e1.name, e1.nickname} == {batch_size, "Alice Updated", "Al"}
+      end
+    end
+
+    test "an attribute no import writes keeps its stored value" do
+      seeds = [%{external_id: "E1", name: "Alice", notes: "keep me"}]
+      csv = "external_id,name\nE1,Alice Updated\n"
+
+      for batch_size <- [100, 1] do
+        %{"E1" => e1} = import_over_seeds(seeds, :partial_upsert, csv, batch_size)
+        assert {batch_size, e1.name, e1.notes} == {batch_size, "Alice Updated", "keep me"}
+      end
+    end
+
+    test "rows in one batch that change different attributes each keep their other values" do
+      seeds = [
+        %{external_id: "E1", name: "Alice", notes: "keep me"},
+        %{external_id: "E2", name: "Bob", notes: "replace me"}
+      ]
+
+      csv = "external_id,name\nE1,Alice Updated\nE2,SetNotes\n"
+
+      for batch_size <- [100, 1] do
+        %{"E1" => e1, "E2" => e2} =
+          import_over_seeds(seeds, :partial_upsert_conditional, csv, batch_size)
+
+        assert {batch_size, e1.name, e1.notes} == {batch_size, "Alice Updated", "keep me"}
+        assert {batch_size, e2.name, e2.notes} == {batch_size, "SetNotes", "from change"}
+      end
+    end
+
+    test "an action's declared upsert_fields limit what an upsert changes" do
+      seeds = [%{external_id: "E1", name: "Alice", nickname: "Al"}]
+      csv = "external_id,name,nickname\nE1,Alice Updated,Ally\n"
+
+      for batch_size <- [100, 1] do
+        %{"E1" => e1} = import_over_seeds(seeds, :partial_upsert_declared_fields, csv, batch_size)
+        assert {batch_size, e1.name, e1.nickname} == {batch_size, "Alice Updated", "Al"}
+      end
+    end
+  end
+
   describe "validation-failure isolation in batch mode" do
     test "an invalid row's batch-mates are still committed and queryable" do
       csv = """
@@ -115,7 +188,7 @@ defmodule AshCsvInterchange.Import.BatchedCommitTest do
   end
 
   describe "crash isolation in batch mode" do
-    test "a raising row's batch-mates are still committed" do
+    test "a row whose change raises goes per-row, and its batch-mates are still bulk-committed" do
       csv = """
       name
       ok1
@@ -133,8 +206,9 @@ defmodule AshCsvInterchange.Import.BatchedCommitTest do
 
       assert {:ok, report} = result
 
-      # The warning is a deliberate signal. Assert it, do not hide it.
-      assert log =~ "Ash.bulk_create raised"
+      # The raise happens while the row's changeset is built, before the
+      # bulk dispatch, so the batch itself never falls back.
+      refute log =~ "Ash.bulk_create raised"
 
       [ok1, crashed, ok2] = report.outcomes
       assert ok1.status == :ok
@@ -147,6 +221,31 @@ defmodule AshCsvInterchange.Import.BatchedCommitTest do
       names = records |> MapSet.new(& &1.name)
       assert MapSet.subset?(MapSet.new(["ok1", "ok2"]), names)
       refute MapSet.member?(names, "boom")
+    end
+
+    test "a raise inside the bulk dispatch falls back per-row for the batch" do
+      csv = """
+      name
+      ok1
+      boom
+      ok2
+      """
+
+      {result, log} =
+        with_log(fn ->
+          Orchestrator.import_csv(HookRaisingResource, :hook_raising, csv,
+            mode: :commit,
+            batch_size: 100
+          )
+        end)
+
+      assert {:ok, report} = result
+
+      # The warning is a deliberate signal. Assert it, do not hide it.
+      assert log =~ "Ash.bulk_create raised"
+
+      assert Enum.map(report.outcomes, & &1.status) == [:ok, :crashed, :ok]
+      assert HookRaisingResource |> Ash.read!() |> Enum.map(& &1.name) |> Enum.sort() == ["ok1", "ok2"]
     end
   end
 
