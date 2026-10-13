@@ -7,13 +7,10 @@ writes the same data back out.
 
 ## Install
 
-The package is a private git dependency until it is published to Hex:
-
 ```elixir
 def deps do
   [
-    {:ash_csv_interchange,
-     git: "git@github.com:team-alembic/ash_csv_interchange.git"}
+    {:ash_csv_interchange, "~> 0.1.0"}
   ]
 end
 ```

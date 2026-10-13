@@ -17,14 +17,10 @@ Resources that use the extension expose:
 
 ## Installation
 
-This is a private git dependency for now (it will be published to Hex later).
-Add it to your `mix.exs` the same way you would `ash_audit` or `ash_workflow`:
-
 ```elixir
 def deps do
   [
-    {:ash_csv_interchange,
-     git: "git@github.com:team-alembic/ash_csv_interchange.git"}
+    {:ash_csv_interchange, "~> 0.1.0"}
   ]
 end
 ```
