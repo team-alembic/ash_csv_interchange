@@ -104,7 +104,7 @@ defmodule AshCsvInterchange.MixProject do
       {:git_ops, "~> 2.6", only: [:dev, :test], runtime: false},
 
       # Syncs usage-rules.md from deps into AGENTS.md or agent skills.
-      {:usage_rules, "~> 1.1", only: [:dev], runtime: false},
+      {:usage_rules, "~> 1.1", only: [:dev, :test], runtime: false},
 
       # Needed by mix igniter.install, mix usage_rules.sync and
       # mix spark.cheat_sheets, whose --check runs under MIX_ENV=test in CI.
